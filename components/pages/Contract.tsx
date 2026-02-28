@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
   Send,
@@ -13,34 +14,74 @@ import {
   Code,
   Cpu,
 } from "lucide-react";
+import {
+  getOrCreateSessionId,
+  fetchChatHistory,
+  sendChatMessage,
+  saveMessagesToLocalStorage,
+  loadMessagesFromLocalStorage,
+  type ChatMessage,
+} from "@/lib/chat";
+import { format } from "date-fns";
 
-const chatMessages = [
-  {
-    role: "customer",
-    label: "CUSTOMER_AI_AGENT",
-    time: "14:20",
-    content:
-      "System requirement: Please provide the final audit report for the ERC-20 staking logic. Ensure all medium-to-high severity findings are addressed in the re-test summary.",
-  },
-  {
-    role: "freelancer",
-    label: "LEAD_AUDITOR",
-    time: "14:45",
-    content:
-      "Understood. I have completed the final verification of the security patches. High-severity issues H-01 and H-02 are now mitigated. Delivery package uploaded to the contract panel.",
-    delivery: "New Delivery: Audit_Report_v2.0_Final.pdf",
-  },
-  {
-    role: "customer",
-    label: "CUSTOMER_AI_AGENT",
-    time: "15:02",
-    content:
-      "Automated verification running on IPFS CID: QmXoyp...76Xz. Hash matches. Final code review shows zero critical vulnerabilities remaining. Awaiting human confirmation for fund release.",
-  },
-];
+type DisplayMessage = {
+  role: "customer" | "freelancer";
+  label: string;
+  time: string;
+  content: string;
+  delivery?: string;
+};
+
+function toDisplayMessage(m: ChatMessage): DisplayMessage {
+  const time = m.timestamp
+    ? format(new Date(m.timestamp), "HH:mm")
+    : format(new Date(), "HH:mm");
+  return {
+    role: m.role === "user" ? "customer" : "freelancer",
+    label: m.role === "user" ? "CUSTOMER_AI_AGENT" : "LEAD_AUDITOR",
+    time,
+    content: m.content,
+  };
+}
 
 const Contract = () => {
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    setSessionId(getOrCreateSessionId());
+  }, []);
+
+  const { data: apiMessages } = useQuery({
+    queryKey: ["chat", sessionId],
+    queryFn: () => fetchChatHistory(sessionId!),
+    enabled: !!sessionId,
+  });
+
+  const sendMutation = useMutation({
+    mutationFn: ({ sid, text }: { sid: string; text: string }) =>
+      sendChatMessage(sid, text),
+    onSuccess: (result, { sid }) => {
+      saveMessagesToLocalStorage(sid, result.messages);
+      queryClient.setQueryData(["chat", sid], result.messages);
+    },
+  });
+
+  const localMessages =
+    typeof window !== "undefined" && sessionId
+      ? loadMessagesFromLocalStorage(sessionId)
+      : [];
+  const messages: DisplayMessage[] = (apiMessages ?? localMessages).map(
+    toDisplayMessage
+  );
+
+  const handleSend = () => {
+    const text = message.trim();
+    if (!text || !sessionId) return;
+    setMessage("");
+    sendMutation.mutate({ sid: sessionId, text });
+  };
 
   return (
     <div className="flex h-full">
@@ -74,11 +115,13 @@ const Contract = () => {
 
         {/* Chat Messages */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          <p className="text-center text-[10px] uppercase tracking-widest text-muted-foreground">
-            Contract Commenced Oct 24, 2023
-          </p>
+          {messages.length === 0 && (
+            <p className="text-center text-[10px] uppercase tracking-widest text-muted-foreground">
+              Contract Commenced Oct 24, 2023
+            </p>
+          )}
 
-          {chatMessages.map((msg, i) => (
+          {messages.map((msg, i) => (
             <motion.div
               key={i}
               initial={{ opacity: 0, y: 10 }}
@@ -141,17 +184,32 @@ const Contract = () => {
         {/* Chat Input */}
         <div className="px-6 py-4 border-t border-border">
           <div className="flex items-center gap-3">
-            <button className="size-9 border border-border flex items-center justify-center text-muted-foreground hover:text-foreground">
+            <button
+              type="button"
+              className="size-9 border border-border flex items-center justify-center text-muted-foreground hover:text-foreground"
+            >
               <Plus className="size-4" />
             </button>
             <input
               type="text"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
               placeholder="Type your message or use / for AI commands..."
               className="flex-1 bg-card border border-border px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-primary transition-colors"
+              disabled={!sessionId || sendMutation.isPending}
             />
-            <button className="size-9 bg-primary flex items-center justify-center text-primary-foreground hover:opacity-90">
+            <button
+              type="button"
+              onClick={handleSend}
+              disabled={!message.trim() || !sessionId || sendMutation.isPending}
+              className="size-9 bg-primary flex items-center justify-center text-primary-foreground hover:opacity-90 disabled:opacity-50"
+            >
               <Send className="size-4" />
             </button>
           </div>
