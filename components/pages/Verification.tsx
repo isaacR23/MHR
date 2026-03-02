@@ -1,95 +1,116 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   Shield,
-  Upload,
-  Camera,
   Mic,
   MicOff,
   CheckCircle,
   ChevronRight,
-  FileImage,
   Volume2,
   FileCheck,
   AlertCircle,
-  X,
 } from "lucide-react";
 
 const steps = [
-  { label: "Photo ID", icon: Camera },
   { label: "Voice Sample", icon: Mic },
   { label: "Terms & Conditions", icon: FileCheck },
 ];
 
 const Verification = () => {
   const [currentStep, setCurrentStep] = useState(0);
-  const [idFile, setIdFile] = useState<File | null>(null);
-  const [idPreview, setIdPreview] = useState<string | null>(null);
-  const [voiceFile, setVoiceFile] = useState<File | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [voiceRecorded, setVoiceRecorded] = useState(false);
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const voiceInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
-  const handleIdUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setIdFile(file);
-      const reader = new FileReader();
-      reader.onload = (ev) => setIdPreview(ev.target?.result as string);
-      reader.readAsDataURL(file);
+  const stopRecording = useCallback(() => {
+    setIsRecording(false);
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
     }
-  };
+  }, []);
 
-  const handleVoiceUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setVoiceFile(file);
-      setVoiceRecorded(true);
-    }
-  };
-
-  const toggleRecording = () => {
+  const toggleRecording = async () => {
     if (isRecording) {
-      setIsRecording(false);
-      setVoiceRecorded(true);
-      if (timerRef.current) clearInterval(timerRef.current);
+      stopRecording();
     } else {
-      setIsRecording(true);
-      setRecordingTime(0);
-      timerRef.current = setInterval(() => {
-        setRecordingTime((t) => {
-          if (t >= 10) {
-            setIsRecording(false);
-            setVoiceRecorded(true);
-            if (timerRef.current) clearInterval(timerRef.current);
-            return 10;
-          }
-          return t + 1;
-        });
-      }, 1000);
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioChunksRef.current = [];
+        const mediaRecorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = mediaRecorder;
+
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) audioChunksRef.current.push(e.data);
+        };
+
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+          setAudioBlob(blob);
+          setVoiceRecorded(true);
+          stream.getTracks().forEach((t) => t.stop());
+        };
+
+        mediaRecorder.start();
+        setIsRecording(true);
+        setRecordingTime(0);
+
+        timerRef.current = setInterval(() => {
+          setRecordingTime((t) => {
+            if (t >= 10) {
+              stopRecording();
+              return 10;
+            }
+            return t + 1;
+          });
+        }, 1000);
+      } catch {
+        setUploadError("Microphone access denied. Please allow microphone permissions.");
+      }
     }
   };
 
   const canProceed = () => {
-    if (currentStep === 0) return !!idFile;
-    if (currentStep === 1) return voiceRecorded;
-    if (currentStep === 2) return termsAccepted;
+    if (currentStep === 0) return voiceRecorded;
+    if (currentStep === 1) return termsAccepted && !isUploading;
     return false;
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (currentStep < steps.length - 1) {
       setCurrentStep(currentStep + 1);
     } else {
-      setSubmitted(true);
+      setUploadError(null);
+      setIsUploading(true);
+      try {
+        const formData = new FormData();
+        if (audioBlob) {
+          formData.append("file", audioBlob, "voice-sample.webm");
+        }
+        const response = await fetch(process.env.UPLOAD_AUDIO, {
+          method: "POST",
+          body: formData,
+        });
+        if (!response.ok) {
+          throw new Error(`Upload failed: ${response.statusText}`);
+        }
+        setSubmitted(true);
+      } catch (err) {
+        setUploadError(err instanceof Error ? err.message : "Upload failed. Please try again.");
+      } finally {
+        setIsUploading(false);
+      }
     }
   };
 
@@ -198,84 +219,8 @@ const Verification = () => {
         transition={{ duration: 0.3 }}
         className="space-y-6"
       >
-        {/* Step 1: Photo ID */}
+        {/* Step 1: Voice Sample */}
         {currentStep === 0 && (
-          <div className="space-y-6">
-            <div className="border border-border bg-card p-6 space-y-4">
-              <div className="flex items-center gap-2">
-                <FileImage className="size-5 text-primary" />
-                <h2 className="text-sm font-bold uppercase tracking-widest text-foreground">
-                  Upload Photo ID
-                </h2>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Upload a clear photo of your government-issued ID (passport,
-                driver&apos;s license, or national ID card). The image should be
-                well-lit and all text should be readable.
-              </p>
-
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleIdUpload}
-                className="hidden"
-              />
-
-              {idPreview ? (
-                <div className="relative border border-border">
-                  <img
-                    src={idPreview}
-                    alt="ID Preview"
-                    className="w-full max-h-64 object-contain bg-background p-4"
-                  />
-                  <button
-                    onClick={() => {
-                      setIdFile(null);
-                      setIdPreview(null);
-                    }}
-                    className="absolute top-3 right-3 size-8 bg-card border border-border flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors"
-                  >
-                    <X className="size-4" />
-                  </button>
-                  <div className="p-3 border-t border-border flex items-center gap-2">
-                    <CheckCircle className="size-4 text-success" />
-                    <span className="text-xs font-medium text-success uppercase tracking-widest">
-                      {idFile?.name}
-                    </span>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full border-2 border-dashed border-border py-12 flex flex-col items-center gap-3 hover:border-primary/50 transition-colors"
-                >
-                  <Upload className="size-8 text-muted-foreground" />
-                  <div className="text-center">
-                    <p className="text-sm font-medium text-foreground">
-                      Click to upload or drag & drop
-                    </p>
-                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1">
-                      JPG, PNG, or PDF · Max 10MB
-                    </p>
-                  </div>
-                </button>
-              )}
-            </div>
-
-            <div className="border border-border bg-card p-4 flex items-start gap-3">
-              <Shield className="size-4 text-primary mt-0.5 flex-shrink-0" />
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Your documents are encrypted end-to-end and processed by our
-                secure AI verification system. They are never shared with third
-                parties and are automatically deleted after verification.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Step 2: Voice Sample */}
-        {currentStep === 1 && (
           <div className="space-y-6">
             <div className="border border-border bg-card p-6 space-y-4">
               <div className="flex items-center gap-2">
@@ -285,9 +230,8 @@ const Verification = () => {
                 </h2>
               </div>
               <p className="text-sm text-muted-foreground">
-                Record a short voice sample or upload an audio file. Our AI will
-                analyze the sample to create a unique voiceprint for your
-                identity.
+                Record a short voice sample. Our AI will analyze the sample to
+                create a unique voiceprint for your identity.
               </p>
 
               <div className="border border-border p-4 bg-background space-y-2">
@@ -339,7 +283,7 @@ const Verification = () => {
                       <button
                         onClick={() => {
                           setVoiceRecorded(false);
-                          setVoiceFile(null);
+                          setAudioBlob(null);
                           setRecordingTime(0);
                         }}
                         className="text-[10px] text-primary uppercase tracking-widest hover:opacity-80"
@@ -360,36 +304,6 @@ const Verification = () => {
                 </div>
               </div>
 
-              <div className="flex items-center gap-4">
-                <div className="flex-1 h-px bg-border" />
-                <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-medium">
-                  or upload file
-                </span>
-                <div className="flex-1 h-px bg-border" />
-              </div>
-
-              <input
-                ref={voiceInputRef}
-                type="file"
-                accept="audio/*"
-                onChange={handleVoiceUpload}
-                className="hidden"
-              />
-              <button
-                onClick={() => voiceInputRef.current?.click()}
-                className="w-full border border-border py-3 text-sm font-medium text-foreground flex items-center justify-center gap-2 hover:bg-accent transition-colors"
-              >
-                <Upload className="size-4" />
-                Upload Audio File
-              </button>
-              {voiceFile && (
-                <div className="flex items-center gap-2 text-xs text-success">
-                  <CheckCircle className="size-3.5" />
-                  <span className="uppercase tracking-widest font-medium">
-                    {voiceFile.name}
-                  </span>
-                </div>
-              )}
             </div>
 
             <div className="border border-border bg-card p-4 flex items-start gap-3">
@@ -403,8 +317,8 @@ const Verification = () => {
           </div>
         )}
 
-        {/* Step 3: Terms & Conditions */}
-        {currentStep === 2 && (
+        {/* Step 2: Terms & Conditions */}
+        {currentStep === 1 && (
           <div className="space-y-6">
             <div className="border border-border bg-card p-6 space-y-4">
               <div className="flex items-center gap-2">
@@ -487,36 +401,52 @@ const Verification = () => {
       </motion.div>
 
       {/* Actions */}
-      <div className="border-t border-border pt-6 flex items-center justify-between">
-        <button
-          onClick={() =>
-            setCurrentStep(Math.max(0, currentStep - 1))
-          }
-          className="border border-border text-foreground px-6 py-3 text-xs font-bold uppercase tracking-wide hover:bg-accent transition-colors"
-        >
-          {currentStep === 0 ? "Cancel" : "Back"}
-        </button>
-        <button
-          onClick={handleNext}
-          disabled={!canProceed()}
-          className={`px-8 py-3 text-xs font-bold uppercase tracking-wide flex items-center gap-2 transition-all ${
-            canProceed()
-              ? "bg-primary text-primary-foreground hover:opacity-90"
-              : "bg-muted text-muted-foreground cursor-not-allowed"
-          }`}
-        >
-          {currentStep === steps.length - 1 ? (
-            <>
-              <Shield className="size-4" />
-              Submit for Verification
-            </>
-          ) : (
-            <>
-              Continue
-              <ChevronRight className="size-4" />
-            </>
-          )}
-        </button>
+      <div className="border-t border-border pt-6 space-y-3">
+        {uploadError && (
+          <div className="flex items-center gap-2 text-xs text-destructive">
+            <AlertCircle className="size-4 flex-shrink-0" />
+            <span>{uploadError}</span>
+          </div>
+        )}
+        <div className="flex items-center justify-between">
+          <button
+            onClick={() =>
+              setCurrentStep(Math.max(0, currentStep - 1))
+            }
+            disabled={isUploading}
+            className="border border-border text-foreground px-6 py-3 text-xs font-bold uppercase tracking-wide hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {currentStep === 0 ? "Cancel" : "Back"}
+          </button>
+          <button
+            onClick={handleNext}
+            disabled={!canProceed()}
+            className={`px-8 py-3 text-xs font-bold uppercase tracking-wide flex items-center gap-2 transition-all ${
+              canProceed()
+                ? "bg-primary text-primary-foreground hover:opacity-90"
+                : "bg-muted text-muted-foreground cursor-not-allowed"
+            }`}
+          >
+            {currentStep === steps.length - 1 ? (
+              isUploading ? (
+                <>
+                  <span className="size-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+                  Uploading...
+                </>
+              ) : (
+                <>
+                  <Shield className="size-4" />
+                  Submit for Verification
+                </>
+              )
+            ) : (
+              <>
+                Continue
+                <ChevronRight className="size-4" />
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );
