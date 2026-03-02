@@ -1,0 +1,233 @@
+================================================================================
+AUTHENTICATION WORKFLOW SPEC: LOGIN / SIGN UP
+================================================================================
+
+SUMMARY
+-------
+- The app uses Magic (magic-sdk) for passwordless email login. There is no
+  separate "sign up" flow: sign up and sign in use the same page and the same
+  Magic flow (loginWithEmailOTP).
+- Authentication is entirely CLIENT-SIDE. The app does NOT use HTTP-only cookies
+  for auth and does NOT use server-side session auth. No API route verifies a
+  Magic DID token or sets an auth cookie. "Logged in" is determined by the
+  Magic SDK in the browser and by React state (eoaAddress / userEmail) in
+  WalletProvider.
+- Protected routes are enforced only in the client (React components check
+  eoaAddress / trading session); there is no auth middleware.
+
+================================================================================
+1. AUTH PROVIDER: MAGIC SDK (CLIENT-SIDE ONLY)
+================================================================================
+
+Magic is initialized in the browser only (lib/magic.ts). There is no
+server-side Magic instance or token verification.
+
+Example: Magic initialization (conceptually what runs in the app)
+
+  // lib/magic.ts (simplified)
+  import { Magic } from "magic-sdk";
+  import { polygon } from "viem/chains";
+
+  let magicInstance: Magic | null = null;
+
+  export default function getMagic(): Magic {
+    if (!magicInstance && typeof window !== "undefined") {
+      const config: any = {
+        network: { rpcUrl: POLYGON_PRIVATE_RPC_URL, chainId: polygon.id },
+      };
+      if (shouldUseTestMode) config.testMode = true;
+      magicInstance = new Magic(process.env.NEXT_PUBLIC_MAGIC_API_KEY!, config);
+    }
+    return magicInstance!;
+  }
+
+The Magic API key is public (NEXT_PUBLIC_*). Security relies on Magic’s own
+backend and the fact that the SDK runs only in the browser; the Next.js server
+never sees or validates a Magic DID token.
+
+================================================================================
+2. SIGN IN / SIGN UP FLOW (SAME FLOW FOR BOTH)
+================================================================================
+
+Routes:
+  - /[lang]/signin  → SignInPage
+  - /[lang]/signup  → re-exports SignInPage
+  - /[lang]/register → re-exports SignInPage
+
+The same component handles sign in and sign up. Only the heading/subheading
+change based on pathname (e.g. "Create your account" vs "Welcome back").
+
+Step-by-step with example snippets:
+
+  (1) User enters email and submits the form.
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!email || !email.includes("@")) {
+      setError(dict.signin?.invalidEmail || "Please enter a valid email address");
+      return;
+    }
+    setIsLoading(true);
+    try {
+      datafastTrack("login", { type: "funnel" });
+      const magic = getMagic();
+      if (!magic) throw new Error("Magic SDK not initialized");
+
+      await magic.auth.loginWithEmailOTP({ email });
+      await syncWalletState();
+      datafastIdentify(email, { email });
+      router.push("/");
+    } catch (err: any) {
+      setError(err.message || dict.signin?.error || "An error occurred during sign in");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  (2) magic.auth.loginWithEmailOTP({ email }) — Magic sends an OTP/link to the
+  email. The user completes the challenge in the browser. Magic then establishes
+  the session (stored by the Magic SDK in the browser; the app does not
+  implement HTTP-only or server-side session).
+
+  (3) After login, syncWalletState() runs. That calls fetchUser() in
+  WalletProvider, which uses Magic to get user identity and wallet address:
+
+  const fetchUser = useCallback(async () => {
+    const magic = getMagic();
+    if (!magic) return;
+    const userInfo = await magic.user.getInfo();
+    const address = (userInfo as any).wallets?.ethereum?.publicAddress;
+    const email = (userInfo as any).email;
+    setEoaAddress(address ? (address as `0x${string}`) : undefined);
+    setUserEmail(email || null);
+    if (address) await checkOrCreateRegistrationTimestamp(address);
+  }, []);
+
+  (4) checkOrCreateRegistrationTimestamp(address) is app bookkeeping only. It
+  calls the /api/redis API to store or read a registration timestamp for the
+  wallet address. The Redis API does NOT authenticate the user (no Magic token
+  or cookie is sent or checked):
+
+  const checkOrCreateRegistrationTimestamp = async (address: string) => {
+    const key = `app:user:registration:${address}`;
+    const response = await fetch(`/api/redis?key=${encodeURIComponent(key)}`);
+    const data = await response.json();
+    if (!data.value) {
+      const timestamp = new Date().toISOString();
+      await fetch("/api/redis", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, value: timestamp }),
+      });
+    }
+  };
+
+  (5) datafastIdentify(email, { email }) and router.push("/") — analytics
+  identity and redirect to home. No auth cookie or server session is set.
+
+================================================================================
+3. HOW "LOGGED IN" IS DETERMINED (CLIENT-SIDE ONLY)
+================================================================================
+
+On app load, WalletProvider checks Magic and populates React state:
+
+  useEffect(() => {
+    const magic = getMagic();
+    if (!magic) return;
+    setWalletClient(...);
+    setEthersSigner(...);
+    magic.user.isLoggedIn().then((isLoggedIn) => {
+      if (isLoggedIn) fetchUser();
+    });
+  }, []);
+
+So:
+  - "Logged in" = Magic says isLoggedIn() and fetchUser() has set eoaAddress
+    (and usually userEmail) in WalletContext.
+  - There is no server session and no HTTP-only cookie. The source of truth is
+    the Magic SDK state in the browser and the WalletProvider state (eoaAddress,
+    userEmail, isConnected: !!eoaAddress).
+
+================================================================================
+4. LOGOUT
+================================================================================
+
+  const disconnect = useCallback(async () => {
+    const magic = getMagic();
+    if (!magic) return;
+    try {
+      await magic.user.logout();
+      setEoaAddress(undefined);
+      setUserEmail(null);
+    } catch (error) {
+      console.error("Disconnect error:", error);
+    }
+  }, []);
+
+No server call to invalidate a session and no cookie cleared by the app (Magic
+may clear its own client-side storage on logout).
+
+================================================================================
+5. PROTECTED ROUTES (CLIENT-SIDE ONLY)
+================================================================================
+
+There is no auth middleware. "Protected" pages (e.g. positions, orders) render
+content only when the client has eoaAddress and (where required) a complete
+trading session; otherwise they show a message and a link to go home or sign in.
+
+Example (positions page):
+
+  const { isTradingSessionComplete, eoaAddress } = useTrading();
+  if (!eoaAddress || !isTradingSessionComplete) {
+    return (
+      // ... card with "Authentication Required" and "Please sign in and
+      // initialize your trading session to view positions." and "Go to Home"
+    );
+  }
+  return ( /* actual positions content */ );
+
+So protection is purely UI/context-based; the server does not enforce auth for
+these routes.
+
+================================================================================
+6. TRADING SESSION (NOT AUTH — APP STATE)
+================================================================================
+
+Trading session is stored in localStorage, keyed by wallet address:
+
+  const key = `polymarket_trading_session_${address.toLowerCase()}`;
+  localStorage.setItem(key, JSON.stringify(session));
+
+It holds Safe address, API credentials, approvals, etc. It is not an
+authentication mechanism; it is app/trading state that lives in the client.
+
+================================================================================
+7. COOKIES IN THE APP
+================================================================================
+
+- datafast_visitor_id: Used by DataFast analytics. Read in API routes
+  (e.g. /api/datafast/goal, /api/datafast/payment) to forward server-side
+  requests. Not used for login/signup or auth.
+- No HTTP-only (or other) cookie is set or read for authentication. The app
+  does not use server-side auth.
+
+================================================================================
+8. DIRECT ANSWERS
+================================================================================
+
+Is the app using HTTP-only cookies for auth?
+  No. No auth cookie (HTTP-only or otherwise) is set or read.
+
+Does the app have server-side auth?
+  No. There is no middleware or API route that verifies a Magic DID token or
+  maintains a server session. Login/signup and "logged in" are determined
+  entirely by the Magic SDK and React state in the browser.
+
+Full flow in one sentence:
+  User enters email on the signin (or signup/register) page → Magic
+  loginWithEmailOTP sends OTP/link → user completes in browser → Magic stores
+  session client-side → app calls magic.user.getInfo() and sets eoaAddress
+  and userEmail in WalletProvider → optional Redis call to store registration
+  timestamp (no auth) → redirect home; all auth state is client-side (Magic +
+  React context), no server session and no HTTP-only cookie.

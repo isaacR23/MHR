@@ -15,6 +15,7 @@ import {
   Upload,
   ExternalLink,
 } from "lucide-react";
+import { WalletSafeCard } from "@/components/WalletSafeCard";
 
 const defaultSkills = ["Smart Contracts", "Rust", "Solidity", "React", "TypeScript"];
 
@@ -100,12 +101,22 @@ const Profile = () => {
         </div>
       </motion.div>
 
+      {/* Wallet & Safe (ensure Safe flow for testing) */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.05 }}
+        className="mt-14"
+      >
+        <WalletSafeCard />
+      </motion.div>
+
       {/* Identity */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}
-        className="pt-14 space-y-4"
+        className="pt-6 space-y-4"
       >
         {isEditing ? (
           <div className="space-y-3">

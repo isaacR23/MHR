@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Briefcase } from "lucide-react";
+import { Briefcase, LogIn, UserPlus, LogOut } from "lucide-react";
 import { navItems, signInNavItem } from "@/lib/nav";
+import { useAuth } from "@/components/providers/AuthProvider";
 
 export default function AppSidebar() {
   const pathname = usePathname();
+  const { isLoggedIn, userEmail, logout, isLoading } = useAuth();
   const SignInIcon = signInNavItem.icon;
 
   return (
@@ -60,13 +62,47 @@ export default function AppSidebar() {
             </span>
           </div>
         </div>
-        <Link
-          href={signInNavItem.path}
-          className="flex items-center justify-center gap-2 w-full border border-border text-foreground py-2.5 text-sm font-bold uppercase tracking-wide hover:bg-accent transition-colors"
-        >
-          {SignInIcon && <SignInIcon className="size-4" />}
-          Sign In
-        </Link>
+        {!isLoading && (
+          <>
+            {isLoggedIn ? (
+              <div className="space-y-2">
+                <div className="border border-border p-3">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Connected
+                  </p>
+                  <p className="text-xs font-medium text-foreground truncate mt-1" title={userEmail ?? undefined}>
+                    {userEmail ?? "—"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => logout()}
+                  className="flex items-center justify-center gap-2 w-full border border-border text-foreground py-2.5 text-sm font-bold uppercase tracking-wide hover:bg-accent transition-colors"
+                >
+                  <LogOut className="size-4" />
+                  Log out
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <Link
+                  href="/auth?mode=signin"
+                  className="flex items-center justify-center gap-2 w-full border border-border text-foreground py-2.5 text-sm font-bold uppercase tracking-wide hover:bg-accent transition-colors"
+                >
+                  {SignInIcon && <SignInIcon className="size-4" />}
+                  Sign In
+                </Link>
+                <Link
+                  href="/auth?mode=signup"
+                  className="flex items-center justify-center gap-2 w-full border border-border text-foreground py-2.5 text-sm font-bold uppercase tracking-wide hover:bg-accent transition-colors"
+                >
+                  <UserPlus className="size-4" />
+                  Sign Up
+                </Link>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </aside>
   );

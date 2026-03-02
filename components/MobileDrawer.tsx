@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Briefcase, X } from "lucide-react";
-import { navItems, signInNavItem } from "@/lib/nav";
+import { Briefcase, X, LogIn, UserPlus, LogOut } from "lucide-react";
+import { navItems } from "@/lib/nav";
+import { useAuth } from "@/components/providers/AuthProvider";
 
 interface MobileDrawerProps {
   open: boolean;
@@ -13,7 +14,8 @@ interface MobileDrawerProps {
 
 export default function MobileDrawer({ open, onClose }: MobileDrawerProps) {
   const pathname = usePathname();
-  const allItems = [...navItems, signInNavItem];
+  const { isLoggedIn, userEmail, logout, isLoading } = useAuth();
+  const allItems = [...navItems];
 
   return (
     <AnimatePresence>
@@ -94,6 +96,52 @@ export default function MobileDrawer({ open, onClose }: MobileDrawerProps) {
                   </span>
                 </div>
               </div>
+              {!isLoading && (
+                <>
+                  {isLoggedIn ? (
+                    <div className="space-y-2">
+                      <div className="border border-border p-3">
+                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                          Connected
+                        </p>
+                        <p className="text-xs font-medium text-foreground truncate mt-1" title={userEmail ?? undefined}>
+                          {userEmail ?? "—"}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          logout();
+                          onClose();
+                        }}
+                        className="flex items-center justify-center gap-2 w-full border border-border text-foreground py-2.5 text-sm font-bold uppercase tracking-wide hover:bg-accent transition-colors"
+                      >
+                        <LogOut className="size-4" />
+                        Log out
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      <Link
+                        href="/auth?mode=signin"
+                        onClick={onClose}
+                        className="flex items-center justify-center gap-2 w-full border border-border text-foreground py-2.5 text-sm font-bold uppercase tracking-wide hover:bg-accent transition-colors"
+                      >
+                        <LogIn className="size-4" />
+                        Sign In
+                      </Link>
+                      <Link
+                        href="/auth?mode=signup"
+                        onClick={onClose}
+                        className="flex items-center justify-center gap-2 w-full border border-border text-foreground py-2.5 text-sm font-bold uppercase tracking-wide hover:bg-accent transition-colors"
+                      >
+                        <UserPlus className="size-4" />
+                        Sign Up
+                      </Link>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </motion.aside>
         </>

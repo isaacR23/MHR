@@ -1,0 +1,193 @@
+================================================================================
+WALLET INFRASTRUCTURE: GAS SPONSORSHIP VIA SERVER RELAYER ONLY
+================================================================================
+
+This document explains with code snippets how gas sponsorship works in the app:
+from the Magic EOA (user wallet) to the SAFE wallet. Gas for Safe execution
+is paid only by our server relayer; the user never needs POL. It does NOT use
+file references; all logic is shown as inline code snippets.
+
+================================================================================
+SUMMARY: WHO PAYS GAS AND WHEN
+================================================================================
+
+1. User registers → Magic creates an EOA (no POL). The EOA is used only to
+   sign (e.g. Safe transaction signatures); it does not need to hold POL.
+2. SAFE wallet is created (address derived from EOA); deployment gas is paid by
+   Polymarket’s relayer, not by the user or our app.
+3. Safe execution: we replicate the flow via our server relayer only. The EOA
+   signs the Safe transaction; the client POSTs the signed payload to
+   /api/execute-safe-tx; our server relayer (RELAYER_PRIVATE_KEY) submits
+   execTransaction and pays gas. The user never pays gas for Safe execution.
+
+So the gas sponsor for Safe execution is always our server relayer when we use
+this flow. No one-time EOA funding (no SendGas) is required.
+
+================================================================================
+1. MAGIC EOA (USER WALLET) CREATION
+================================================================================
+
+There is no separate “wallet creation” step. When the user signs in with Magic,
+Magic provisions a non-custodial EOA. The app only reads that address and
+builds clients from Magic’s RPC provider.
+
+  const magic = getMagic();
+  const userInfo = await magic.user.getInfo();
+  const address = (userInfo as any).wallets?.ethereum?.publicAddress;  // EOA
+
+  const walletClient = createWalletClient({
+    chain: polygon,
+    transport: custom(magic.rpcProvider as any),
+  });
+
+  const ethersProvider = new providers.Web3Provider(magic.rpcProvider as any);
+  const ethersSigner = ethersProvider.getSigner();
+
+The EOA starts with no native token (no POL). In the server-relayer-only flow
+the EOA never submits transactions that pay gas; it only signs. So the EOA
+does not need to be funded.
+
+================================================================================
+2. SAFE WALLET CREATION (DETERMINISTIC + DEPLOY VIA POLYMARKET RELAYER)
+================================================================================
+
+The Safe address is derived from the EOA and the chain’s Safe factory; it is
+not created by our backend. Deployment is done via Polymarket’s RelayClient:
+the user signs; the Polymarket relayer submits the deployment and pays gas.
+
+What is the builder config?
+  BuilderConfig (from @polymarket/builder-signing-sdk) tells Polymarket “which
+  builder” (your app) is making the request. Builder credentials (API key,
+  secret, passphrase) are created at polymarket.com/settings?tab=builder. To
+  keep the secret server-side, we use remoteBuilderConfig with a URL to our
+  API: when the RelayClient needs to authenticate, it POSTs (method, path, body)
+  to that URL; the server signs with the builder secret (HMAC) and returns
+  signature, timestamp, key, and passphrase. So the RelayClient can prove to
+  Polymarket’s relayer that it is your builder without the secret ever being
+  in the browser.
+
+  const builderConfig = new BuilderConfig({
+    remoteBuilderConfig: { url: REMOTE_SIGNING_URL() },  // e.g. /api/polymarket/sign
+  });
+
+SAFE wallet creation (full flow):
+
+  // 1. Derive deterministic Safe address from EOA
+  const config = getContractConfig(POLYGON_CHAIN_ID);
+  const safeAddress = deriveSafe(eoaAddress, config.SafeContracts.SafeFactory);
+
+  // 2. Initialize Polymarket relay client (user's signer + builder config)
+  const relayClient = new RelayClient(
+    RELAYER_URL,
+    POLYGON_CHAIN_ID,
+    ethersSigner,
+    builderConfig
+  );
+
+  // 3. Check if Safe is already deployed
+  const deployed = await relayClient.getDeployed(safeAddress);
+
+  // 4. Deploy Safe if not deployed (user signs; Polymarket relayer pays gas)
+  if (!deployed) {
+    const response = await relayClient.deploy();
+    const result = await relayClient.pollUntilState(
+      response.transactionID,
+      [
+        RelayerTransactionState.STATE_MINED,
+        RelayerTransactionState.STATE_CONFIRMED,
+        RelayerTransactionState.STATE_FAILED,
+      ],
+      "60",
+      3000
+    );
+    // result.proxyAddress === safeAddress (Safe is now on-chain)
+  }
+
+So: gas for Safe deployment is paid by Polymarket’s relayer, not by the user
+EOA and not by our app.
+
+================================================================================
+3. GAS SPONSORSHIP VIA SERVER RELAYER ONLY (EXECUTE-SAFE-TX)
+================================================================================
+
+Safe execution is done via our server relayer. The EOA signs the Safe
+transaction; the client sends the signed payload to our API; the server
+submits execTransaction using RELAYER_PRIVATE_KEY and pays gas. The user never
+needs POL.
+
+Client: create transaction, sign with EOA, POST to relayer
+
+  let safeTransaction = await safeProtocolKit.createTransaction({
+    transactions: [metaTx],
+    options: {
+      safeTxGas: "200000",
+      baseGas: "0",
+      gasPrice: "0",
+      gasToken: "0x0000000000000000000000000000000000000000",
+      refundReceiver: "0x0000000000000000000000000000000000000000",
+    },
+  });
+
+  safeTransaction = await safeProtocolKit.signTransaction(
+    safeTransaction,
+    SigningMethod.ETH_SIGN_TYPED_DATA_V4
+  );
+
+  const res = await fetch("/api/execute-safe-tx", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      safeAddress,
+      safeTx: safeTransaction.data,
+      signatures: safeTransaction.encodedSignatures(),
+    }),
+  });
+
+Server: relayer executes and pays gas
+
+  const account = privateKeyToAccount(
+    (process.env.RELAYER_PRIVATE_KEY!.startsWith("0x")
+      ? process.env.RELAYER_PRIVATE_KEY
+      : "0x" + process.env.RELAYER_PRIVATE_KEY) as `0x${string}`
+  );
+
+  const { request } = await publicClient.simulateContract({
+    account,
+    address: safeAddress as `0x${string}`,
+    abi: safeExecAbi,
+    functionName: "execTransaction",
+    args: [
+      safeTx.to,
+      BigInt(safeTx.value || "0"),
+      safeTx.data,
+      Number(safeTx.operation || 0),
+      BigInt(safeTx.safeTxGas || "0"),
+      BigInt(safeTx.baseGas || "0"),
+      BigInt(safeTx.gasPrice || "0"),
+      safeTx.gasToken || "0x0000000000000000000000000000000000000000",
+      safeTx.refundReceiver || "0x0000000000000000000000000000000000000000",
+      signatures,
+    ],
+  });
+
+  const txHash = await walletClient.writeContract(request);
+
+The gas sponsor for Safe execution is always our RELAYER_PRIVATE_KEY wallet.
+The flow is replicated via the server relayer only; no EOA gas funding is
+required.
+
+================================================================================
+4. FLOW RECAP
+================================================================================
+
+- User registers → Magic creates/provisions the EOA (“wallet with Magic”). ✓
+- SAFE wallet is created (deterministic from EOA, deployed via Polymarket
+  relayer). ✓
+- Gas sponsorship: we replicate the flow via our server relayer only. The EOA
+  only signs; our relayer (RELAYER_PRIVATE_KEY) submits Safe.execTransaction
+  and pays gas. No SendGas, no EOA POL required.
+
+Flow: register → Magic EOA → Safe created → all Safe executions via
+/api/execute-safe-tx (relayer pays gas).
+
+================================================================================
