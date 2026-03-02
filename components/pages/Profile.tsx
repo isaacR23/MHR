@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
+import Link from "next/link";
 import { motion } from "framer-motion";
 import {
   Camera,
@@ -14,8 +15,27 @@ import {
   Save,
   Upload,
   ExternalLink,
+  ShieldCheck,
 } from "lucide-react";
 import { WalletSafeCard } from "@/components/WalletSafeCard";
+import { useAuth } from "@/components/providers/AuthProvider";
+
+function initialsFromEmail(email: string): string {
+  const local = email.split("@")[0]?.trim() || "";
+  const parts = local.split(/[._-]/).filter(Boolean);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[1][0]).toUpperCase().slice(0, 2);
+  }
+  return local.slice(0, 2).toUpperCase() || "??";
+}
+
+function displayNameFromEmail(email: string): string {
+  const local = email.split("@")[0]?.trim() || "";
+  const parts = local.split(/[._-]/).filter(Boolean);
+  return parts
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase())
+    .join(" ") || email;
+}
 
 const defaultSkills = ["Smart Contracts", "Rust", "Solidity", "React", "TypeScript"];
 
@@ -33,12 +53,26 @@ const defaultPortfolio = [
 ];
 
 const Profile = () => {
+  const { userEmail } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [bio, setBio] = useState(
     "Senior blockchain engineer specializing in secure smart contract development and cross-chain protocol design. 6+ years building in Web3, with a focus on DeFi and infrastructure tooling."
   );
-  const [displayName, setDisplayName] = useState("Alex Rivers");
+  const emailDerivedName = useMemo(
+    () => (userEmail ? displayNameFromEmail(userEmail) : "Alex Rivers"),
+    [userEmail]
+  );
+  const [displayName, setDisplayName] = useState(emailDerivedName);
   const [title, setTitle] = useState("Lead Smart Contract Engineer");
+
+  useEffect(() => {
+    if (userEmail) setDisplayName(displayNameFromEmail(userEmail));
+  }, [userEmail]);
+
+  const initials = useMemo(
+    () => (userEmail ? initialsFromEmail(userEmail) : "AR"),
+    [userEmail]
+  );
   const [location, setLocation] = useState("Berlin, Germany");
   const [hourlyRate, setHourlyRate] = useState("$120");
   const [availability, setAvailability] = useState("Available — 30h/week");
@@ -76,7 +110,7 @@ const Profile = () => {
         {/* Avatar */}
         <div className="absolute -bottom-12 left-6">
           <div className="size-24 border-4 border-background bg-card flex items-center justify-center relative group">
-            <span className="text-3xl font-bold text-primary">AR</span>
+            <span className="text-3xl font-bold text-primary">{initials}</span>
             {isEditing && (
               <button className="absolute inset-0 bg-background/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                 <Camera className="size-5 text-foreground" />
@@ -85,8 +119,15 @@ const Profile = () => {
           </div>
         </div>
 
-        {/* Edit toggle */}
-        <div className="absolute -bottom-12 right-0">
+        {/* Edit toggle + Start verification */}
+        <div className="absolute -bottom-12 right-0 flex items-center gap-2">
+          <Link
+            href="/verification"
+            className="flex items-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wide transition-colors bg-emerald-600 text-white hover:bg-emerald-700 border border-emerald-600"
+          >
+            <ShieldCheck className="size-3.5" />
+            Start verification
+          </Link>
           <button
             onClick={() => setIsEditing(!isEditing)}
             className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wide transition-colors ${

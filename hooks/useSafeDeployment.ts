@@ -33,8 +33,8 @@ export function useSafeDeployment(): SafeDeploymentState {
       let relayerUrl: string;
       try {
         relayerUrl = getPolymarketRelayerUrl();
-      } catch {
-        setError("Polymarket relayer URL not configured");
+      } catch (urlErr) {
+        setError(urlErr instanceof Error ? urlErr.message : "Polymarket relayer URL not configured");
         return false;
       }
       const builderConfig = new BuilderConfig({
@@ -89,8 +89,10 @@ export function useSafeDeployment(): SafeDeploymentState {
         let relayerUrl: string;
         try {
           relayerUrl = getPolymarketRelayerUrl();
-        } catch {
-          if (!cancelled) setError("Polymarket relayer URL not configured");
+        } catch (urlErr) {
+          if (!cancelled) {
+            setError(urlErr instanceof Error ? urlErr.message : "Polymarket relayer URL not configured");
+          }
           return;
         }
         const config = getContractConfig(POLYGON_CHAIN_ID);

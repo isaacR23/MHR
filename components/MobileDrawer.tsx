@@ -1,11 +1,15 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Briefcase, X, LogIn, UserPlus, LogOut } from "lucide-react";
+import { X, LogIn, UserPlus, LogOut } from "lucide-react";
 import { navItems } from "@/lib/nav";
 import { useAuth } from "@/components/providers/AuthProvider";
+
+const APP_NAME = "Aigent Flow";
+const WORKSPACE_LABEL = "Workspace v1.0";
 
 interface MobileDrawerProps {
   open: boolean;
@@ -41,15 +45,19 @@ export default function MobileDrawer({ open, onClose }: MobileDrawerProps) {
             <div className="p-6">
               <div className="flex items-center justify-between mb-10">
                 <div className="flex items-center gap-3">
-                  <div className="size-8 bg-primary flex items-center justify-center">
-                    <Briefcase className="size-4 text-primary-foreground" />
-                  </div>
+                  <Image
+                    src="/icon.svg"
+                    alt={APP_NAME}
+                    width={32}
+                    height={32}
+                    className="size-8 shrink-0"
+                  />
                   <div className="flex flex-col">
                     <h1 className="text-foreground text-sm font-bold tracking-tight uppercase">
-                      Aigent Flow
+                      {APP_NAME}
                     </h1>
                     <p className="text-muted-foreground text-[10px] font-medium uppercase tracking-widest">
-                      Workspace v1.0
+                      {WORKSPACE_LABEL}
                     </p>
                   </div>
                 </div>
