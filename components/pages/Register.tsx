@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { X, Plus, Shield, Cpu, Briefcase } from "lucide-react";
@@ -44,6 +44,7 @@ const Register = () => {
   const [profileLoading, setProfileLoading] = useState(true);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const gigTagInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
 
   const addSkill = () => {
     if (newSkill.trim() && !skills.includes(newSkill.trim())) {
@@ -61,6 +62,7 @@ const Register = () => {
   };
 
   const removeGig = (id: string) => {
+    gigTagInputRefs.current.delete(id);
     setGigs(gigs.filter((g) => g.id !== id));
   };
 
@@ -161,7 +163,10 @@ const Register = () => {
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error ?? "Failed to save");
+        const msg = data.detail
+          ? `${data.error}: ${data.detail}`
+          : (data.error ?? "Failed to save");
+        throw new Error(msg);
       }
       router.push("/profile");
     } catch (err) {
@@ -470,22 +475,42 @@ const Register = () => {
                               </button>
                             </span>
                           ))}
-                          <input
-                            type="text"
-                            placeholder="Add tag..."
-                            className="w-24 bg-card border border-border px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-primary"
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                e.preventDefault();
-                                const input = e.currentTarget;
-                                const value = input.value.trim();
+                          <div className="flex items-center gap-1">
+                            <input
+                              ref={(el) => {
+                                if (el) gigTagInputRefs.current.set(gig.id, el);
+                              }}
+                              type="text"
+                              placeholder="Add tag..."
+                              className="w-24 bg-card border border-border px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-primary"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  const input = e.currentTarget;
+                                  const value = input.value.trim();
+                                  if (value) {
+                                    addGigTag(gig.id, value);
+                                    input.value = "";
+                                  }
+                                }
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const input = gigTagInputRefs.current.get(gig.id);
+                                const value = input?.value?.trim();
                                 if (value) {
                                   addGigTag(gig.id, value);
-                                  input.value = "";
+                                  if (input) input.value = "";
                                 }
-                              }
-                            }}
-                          />
+                              }}
+                              className="bg-primary text-primary-foreground p-1 hover:opacity-90 flex items-center justify-center"
+                              aria-label="Add tag"
+                            >
+                              <Plus className="size-3" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>

@@ -6,13 +6,24 @@ const FREELANCER_KEY_PREFIX = "freelancer:";
 
 function parseGigs(raw: unknown): Gig[] {
   if (!Array.isArray(raw)) return [];
-  return raw.filter(
-    (g): g is Gig =>
-      g &&
-      typeof g === "object" &&
-      typeof (g as Gig).id === "string" &&
-      typeof (g as Gig).title === "string"
-  );
+  return raw
+    .filter(
+      (g): g is Record<string, unknown> =>
+        g &&
+        typeof g === "object" &&
+        typeof (g as { id?: unknown }).id === "string" &&
+        typeof (g as { title?: unknown }).title === "string"
+    )
+    .map((g) => ({
+      id: String(g.id),
+      title: String(g.title),
+      description: typeof g.description === "string" ? g.description : "",
+      price: typeof g.price === "string" ? g.price : "",
+      deliveryTime: typeof g.deliveryTime === "string" ? g.deliveryTime : "",
+      tags: Array.isArray(g.tags)
+        ? g.tags.filter((t): t is string => typeof t === "string")
+        : [],
+    }));
 }
 
 function normalizeAddress(addr: string): string {
@@ -93,9 +104,14 @@ export async function POST(request: NextRequest) {
     await redis.set(key, JSON.stringify(profile));
     return NextResponse.json({ ok: true, profile });
   } catch (err) {
-    console.error("[api/freelancer] POST error:", err);
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[api/freelancer] POST error:", message, err);
+    const isNoper = /NOPERM|no permissions.*set/i.test(message);
+    const userError = isNoper
+      ? "Redis token is read-only. Use the Standard token (not Read-Only) from Upstash Console → your database → REST API. Copy with 'Read-Only Token' switch OFF."
+      : "Failed to save freelancer profile";
     return NextResponse.json(
-      { error: "Failed to save freelancer profile" },
+      { error: userError, detail: isNoper ? undefined : message },
       { status: 500 }
     );
   }

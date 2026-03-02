@@ -90,14 +90,36 @@ export function FreelancerPreviewCard({
             {gigs.slice(0, 3).map((gig) => (
               <div
                 key={gig.id}
-                className="border border-border p-3 space-y-1"
+                className="border border-border p-3 space-y-1.5"
               >
                 <p className="text-xs font-semibold text-foreground truncate">
                   {gig.title || "Untitled"}
                 </p>
+                {gig.description ? (
+                  <p className="text-[10px] text-muted-foreground line-clamp-2">
+                    {gig.description}
+                  </p>
+                ) : null}
                 <p className="text-[10px] text-muted-foreground">
                   {gig.price ? `$${gig.price}` : "—"} · {gig.deliveryTime || "—"}
                 </p>
+                {gig.tags?.length ? (
+                  <div className="flex flex-wrap gap-1">
+                    {gig.tags.slice(0, 3).map((tag) => (
+                      <span
+                        key={tag}
+                        className="text-[9px] uppercase tracking-wider text-primary bg-primary/10 px-1.5 py-0.5"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                    {gig.tags.length > 3 && (
+                      <span className="text-[9px] text-muted-foreground">
+                        +{gig.tags.length - 3}
+                      </span>
+                    )}
+                  </div>
+                ) : null}
               </div>
             ))}
             {gigs.length > 3 && (

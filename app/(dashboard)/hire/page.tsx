@@ -1,5 +1,5 @@
-import Hire from "@/components/pages/Hire";
+import { GigsBrowse } from "@/components/pages/GigsBrowse";
 
 export default function HirePage() {
-  return <Hire />;
+  return <GigsBrowse />;
 }
