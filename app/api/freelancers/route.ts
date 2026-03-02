@@ -16,11 +16,14 @@ export async function GET() {
 
   try {
     const keys = await redis.keys(`${FREELANCER_KEY_PREFIX}*`);
-    if (keys.length === 0) {
+    const validKeys = keys.filter(
+      (k): k is string => k != null && typeof k === "string" && k.length > 0
+    );
+    if (validKeys.length === 0) {
       return NextResponse.json({ freelancers: [] });
     }
 
-    const rawList = await redis.mget<string>(...keys);
+    const rawList = await redis.mget(...validKeys);
     const freelancers: FreelancerProfile[] = rawList
       .filter((raw): raw is string => raw != null && typeof raw === "string")
       .map((raw) => {
