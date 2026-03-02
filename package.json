@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "verify-redis": "bun run scripts/verify-redis.ts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
