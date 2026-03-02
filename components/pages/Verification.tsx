@@ -98,7 +98,7 @@ const Verification = () => {
         if (audioBlob) {
           formData.append("file", audioBlob, "voice-sample.webm");
         }
-        const response = await fetch(process.env.UPLOAD_AUDIO, {
+        const response = await fetch(process.env.UPLOAD_AUDIO_URL, {
           method: "POST",
           body: formData,
         });
