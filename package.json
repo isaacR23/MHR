@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "verify-redis": "bun run scripts/verify-redis.ts",
+    "seed-freelancers": "bun run scripts/seed-freelancers.ts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

@@ -3,16 +3,28 @@ import { getRedis } from "@/lib/redis";
 import type { FreelancerProfile, Gig } from "@/lib/freelancer-types";
 
 const FREELANCER_KEY_PREFIX = "freelancer:";
+const GIG_KEY_PREFIX = "gig:";
 
 function parseGigs(raw: unknown): Gig[] {
   if (!Array.isArray(raw)) return [];
-  return raw.filter(
-    (g): g is Gig =>
-      g &&
-      typeof g === "object" &&
-      typeof (g as Gig).id === "string" &&
-      typeof (g as Gig).title === "string"
-  );
+  return raw
+    .filter(
+      (g): g is Record<string, unknown> =>
+        g &&
+        typeof g === "object" &&
+        typeof (g as { id?: unknown }).id === "string" &&
+        typeof (g as { title?: unknown }).title === "string"
+    )
+    .map((g) => ({
+      id: String(g.id),
+      title: String(g.title),
+      description: typeof g.description === "string" ? g.description : "",
+      price: typeof g.price === "string" ? g.price : "",
+      deliveryTime: typeof g.deliveryTime === "string" ? g.deliveryTime : "",
+      tags: Array.isArray(g.tags)
+        ? g.tags.filter((t): t is string => typeof t === "string")
+        : [],
+    }));
 }
 
 function normalizeAddress(addr: string): string {
@@ -91,11 +103,32 @@ export async function POST(request: NextRequest) {
 
     const key = `${FREELANCER_KEY_PREFIX}${profile.address}`;
     await redis.set(key, JSON.stringify(profile));
+
+    // Store each gig in its own Redis key: gig:<address>:<gig_id>
+    const gigKeys = await redis.keys(`${GIG_KEY_PREFIX}${profile.address}:*`);
+    const currentGigIds = new Set(profile.gigs.map((g) => g.id));
+    for (const oldKey of gigKeys) {
+      const gigId = oldKey.split(":").pop();
+      if (gigId && !currentGigIds.has(gigId)) {
+        await redis.del(oldKey);
+      }
+    }
+    for (const gig of profile.gigs) {
+      const gigKey = `${GIG_KEY_PREFIX}${profile.address}:${gig.id}`;
+      const gigRecord = { ...gig, freelancerAddress: profile.address };
+      await redis.set(gigKey, JSON.stringify(gigRecord));
+    }
+
     return NextResponse.json({ ok: true, profile });
   } catch (err) {
-    console.error("[api/freelancer] POST error:", err);
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[api/freelancer] POST error:", message, err);
+    const isNoper = /NOPERM|no permissions.*set/i.test(message);
+    const userError = isNoper
+      ? "Redis token is read-only. Use the Standard token (not Read-Only) from Upstash Console → your database → REST API. Copy with 'Read-Only Token' switch OFF."
+      : "Failed to save freelancer profile";
     return NextResponse.json(
-      { error: "Failed to save freelancer profile" },
+      { error: userError, detail: isNoper ? undefined : message },
       { status: 500 }
     );
   }
