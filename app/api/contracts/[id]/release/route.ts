@@ -20,11 +20,11 @@ type ReleaseBody = { markCompleted?: boolean };
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ contractId: string }> }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { contractId } = await params;
-    if (!contractId?.trim()) {
+    const { id } = await params;
+    if (!id?.trim()) {
       return NextResponse.json(
         { error: "Contract id is required" },
         { status: 400 }
@@ -44,7 +44,7 @@ export async function POST(
     }
 
     const contracts = await loadContracts();
-    const index = contracts.findIndex((c) => c.id === contractId.trim());
+    const index = contracts.findIndex((c) => c.id === id.trim());
     if (index === -1) {
       return NextResponse.json({ error: "Contract not found" }, { status: 404 });
     }
@@ -120,7 +120,7 @@ export async function POST(
           : "Freelancer must call approveFreelancer() on the escrow contract. When both have approved on-chain, funds release automatically.",
     });
   } catch (error) {
-    console.error("[api/contracts/[contractId]/release] POST error:", error);
+    console.error("[api/contracts/[id]/release] POST error:", error);
     return NextResponse.json(
       { error: "Failed to process release" },
       { status: 500 }
