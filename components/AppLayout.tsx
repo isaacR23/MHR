@@ -1,10 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { Menu } from "lucide-react";
 import AppSidebar from "./AppSidebar";
 import TopBar from "./TopBar";
 import MobileDrawer from "./MobileDrawer";
+
+const APP_NAME = "Aigent Flow";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -30,11 +33,15 @@ export default function AppLayout({ children }: AppLayoutProps) {
             <Menu className="size-6" />
           </button>
           <div className="ml-3 flex items-center gap-2">
-            <div className="size-6 bg-primary flex items-center justify-center">
-              <span className="text-[10px] font-bold text-primary-foreground">AF</span>
-            </div>
+            <Image
+              src="/icon.svg"
+              alt={APP_NAME}
+              width={24}
+              height={24}
+              className="size-6 shrink-0"
+            />
             <span className="text-sm font-bold uppercase tracking-tight text-foreground">
-              Aigent Flow
+              {APP_NAME}
             </span>
           </div>
         </header>

@@ -1,0 +1,23 @@
+
+# Overview
+
+This document describes the hiring flow for customers in the application.
+
+## Flow
+
+1. **Browse Gigs** — All gigs and their detail pages are publicly available for exploration.
+
+2. **Authentication** — When a customer clicks on a gig, they are prompted to sign up or log in if they haven't already.
+
+3. **Quote Request & Chat Unlock** — Once the customer requests a quote, a dedicated chat page is unlocked where the customer and freelancer can communicate directly.
+
+4. **Proposal Submission** — From the chat, the customer can send a proposal containing:
+   - A description of the work
+   - Price
+   - Deadline
+
+5. **Proposal Review** — The freelancer can view and respond to proposals directly within the chat.
+
+6. **Contract Activation** — If the freelancer accepts the proposal, an escrow smart contract is deployed. The customer is required to deposit the agreed payment upfront into the escrow.
+
+7. **Delivery & Fund Release** — Once the work is delivered, **both the customer and the freelancer must confirm acceptance** of the delivery before the funds are released to the freelancer's account.

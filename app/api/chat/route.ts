@@ -8,8 +8,6 @@ export type ChatMessage = {
 };
 
 const CHAT_KEY_PREFIX = "chat:";
-const MODERATOR_SYSTEM_PROMPT =
-  "You are a contract chat moderator. Respond concisely and professionally in the context of smart contract audits and escrow. Keep replies brief.";
 const REPLIES = [
   "Understood. I have completed the final verification of the security patches. High-severity issues H-01 and H-02 are now mitigated. Delivery package uploaded to the contract panel.",
   "Automated verification running on IPFS CID: QmXoyp...76Xz. Hash matches. Final code review shows zero critical vulnerabilities remaining. Awaiting human confirmation for fund release.",
@@ -29,8 +27,7 @@ async function getMistralReply(
   const apiKey = process.env.MISTRAL_API_KEY;
   if (!apiKey?.trim()) return null;
 
-  const mistralMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
-    { role: "system", content: MODERATOR_SYSTEM_PROMPT },
+  const mistralMessages: { role: "user" | "assistant"; content: string }[] = [
     ...existing.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
     { role: "user", content: userContent },
   ];
