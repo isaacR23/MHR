@@ -3,6 +3,7 @@ import { getRedis } from "@/lib/redis";
 import type { FreelancerProfile, Gig } from "@/lib/freelancer-types";
 
 const FREELANCER_KEY_PREFIX = "freelancer:";
+const GIG_KEY_PREFIX = "gig:";
 
 function parseGigs(raw: unknown): Gig[] {
   if (!Array.isArray(raw)) return [];
@@ -102,6 +103,22 @@ export async function POST(request: NextRequest) {
 
     const key = `${FREELANCER_KEY_PREFIX}${profile.address}`;
     await redis.set(key, JSON.stringify(profile));
+
+    // Store each gig in its own Redis key: gig:<address>:<gig_id>
+    const gigKeys = await redis.keys(`${GIG_KEY_PREFIX}${profile.address}:*`);
+    const currentGigIds = new Set(profile.gigs.map((g) => g.id));
+    for (const oldKey of gigKeys) {
+      const gigId = oldKey.split(":").pop();
+      if (gigId && !currentGigIds.has(gigId)) {
+        await redis.del(oldKey);
+      }
+    }
+    for (const gig of profile.gigs) {
+      const gigKey = `${GIG_KEY_PREFIX}${profile.address}:${gig.id}`;
+      const gigRecord = { ...gig, freelancerAddress: profile.address };
+      await redis.set(gigKey, JSON.stringify(gigRecord));
+    }
+
     return NextResponse.json({ ok: true, profile });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
