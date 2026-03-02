@@ -1,0 +1,163 @@
+# Contract deployment plan: escrow on freelance task acceptance
+
+Based on docs/escrow-deployment.md. Use this when copying a Forge-built escrow from another project and deploying it via viem each time a freelancer accepts a task.
+
+---
+
+## 1. Copy needed files from the other Forge project
+
+From the project that has the escrow contract built with Foundry (Forge):
+
+### 1.1 Solidity source
+
+- Copy the escrow contract source (e.g. `Escrow.sol`) into this repo under:
+  - **contracts/Escrow.sol** (create `contracts/` at repo root if it does not exist).
+
+- If the escrow depends on other Solidity files (e.g. interfaces, shared libs), copy those into `contracts/` as well so paths resolve.
+
+### 1.2 Foundry config (optional but recommended)
+
+- Copy **foundry.toml** to the repo root so `forge build` works the same way.
+- If the other project uses remappings (e.g. `@openzeppelin/`), copy the `remappings` section or the whole **remappings.txt** so imports resolve.
+
+### 1.3 Build output (bytecode + ABI)
+
+- After running `forge build` in this repo (see step 3), the artifact will be at:
+  - **contracts/out/Escrow.sol/Escrow.json** (Foundry default).
+- That JSON contains:
+  - `abi`
+  - `bytecode.object` (deployment bytecode as hex).
+
+Do **not** copy the other project’s `out/` into this repo; generate it here with `forge build` so the artifact matches the copied source and config.
+
+---
+
+## 2. Where things live in this repo
+
+| What                    | Location |
+|-------------------------|----------|
+| Solidity source         | `contracts/Escrow.sol` (and any dependencies in `contracts/`) |
+| Foundry config          | `foundry.toml` at repo root |
+| Build output (ABI + hex)| `contracts/out/Escrow.sol/Escrow.json` (after `forge build`) |
+| Consumption in the API | `lib/escrow-artifact.ts` (reads the JSON, exports ABI + bytecode) |
+| Deploy API route        | `app/api/deploy-escrow/route.ts` (already exists; can be switched to use artifact) |
+| Secrets                | `.env`: only `RELAYER_PRIVATE_KEY` (no bytecode in env) |
+
+---
+
+## 3. Using viem to deploy the contract
+
+The app already uses **viem** (see `app/api/execute-safe-tx/route.ts` and `app/api/deploy-escrow/route.ts`). Deployment is done with `walletClient.deployContract()`.
+
+### 3.1 Flow (systematic launch)
+
+1. **Trigger**  
+   When a freelancer accepts a task (or when the contract is “activated”), your backend or frontend calls:
+   - `POST /api/deploy-escrow`
+   with body: `{ payer, payee, amountWei, token? }`.
+
+2. **Backend (deploy-escrow route)**  
+   - Load ABI and bytecode (from `lib/escrow-artifact.ts`; see section 4).
+   - Build constructor args from the request (e.g. payer, payee, amountWei, token).
+   - Create a viem `WalletClient` with `RELAYER_PRIVATE_KEY` and the same chain (e.g. Polygon) used in `execute-safe-tx`.
+   - Call:
+     - `walletClient.deployContract({ abi, bytecode, args, account })`
+     - Returns transaction hash.
+   - Wait for receipt:
+     - `publicClient.waitForTransactionReceipt({ hash })`
+     - Read `receipt.contractAddress` (or derive via deployer + nonce if needed).
+   - Respond with `{ contractAddress, transactionHash, network }`.
+
+3. **Persist**  
+   Save the new address in the contract’s `contractSpecs`, e.g.:
+   - `contractSpecs: [{ network: "polygon", escrowAddress: contractAddress }]`
+   (aligned with `types/active_contract_page.ts` and `docs/escrow-deployment.md`).
+
+4. **Later**  
+   Funding, release, and dispute use this `escrowAddress` (e.g. via Safe or direct calls), same relayer pattern as today.
+
+### 3.2 viem calls (reference)
+
+- **Wallet + chain**  
+  Same pattern as `execute-safe-tx`: `privateKeyToAccount`, `createWalletClient`, `createPublicClient`, `http(rpcUrl)`, chain = `polygon`.
+
+- **Deploy**  
+  - `walletClient.deployContract({ abi, bytecode, args, account })`  
+  - `args` must match the constructor order and types in your Solidity contract (e.g. payer, payee, amountWei, token).  
+  - Types are inferred from the ABI if you use the artifact’s ABI.
+
+- **Receipt**  
+  - `publicClient.waitForTransactionReceipt({ hash: txHash })`  
+  - `receipt.contractAddress` is the new escrow address.
+
+If your escrow constructor has a different signature (e.g. extra args like dispute timeout), update the ABI and the request body / `args` in the deploy route accordingly.
+
+---
+
+## 4. Load bytecode and ABI from build output (recommended)
+
+Per docs/escrow-deployment.md, do **not** put bytecode in `.env`. Load from the Forge build output instead.
+
+### 4.1 Add an artifact module
+
+- Create **lib/escrow-artifact.ts** that:
+  - Imports the Foundry artifact, e.g.:
+    - `import escrowArtifact from '@/contracts/out/Escrow.sol/Escrow.json'`
+    - Or use `readFileSync` if the path is outside the Next bundle.
+  - Exports:
+    - `escrowAbi = escrowArtifact.abi`
+    - `escrowBytecode = escrowArtifact.bytecode.object` (hex string; Foundry uses `bytecode.object`).
+
+- In **app/api/deploy-escrow/route.ts**:
+  - Import `escrowAbi` and `escrowBytecode` from `@/lib/escrow-artifact`.
+  - Remove use of `process.env.ESCROW_BYTECODE`.
+  - Keep constructor args from the request body; only ABI/bytecode come from the artifact.
+
+### 4.2 Constructor ABI
+
+- The deploy route currently uses a minimal constructor ABI (payer, payee, amountWei, token).  
+- Once you use the full artifact, you can use `escrowArtifact.abi` so the constructor (and any later calls) stay in sync with the Solidity contract.
+
+---
+
+## 5. Build pipeline
+
+- Run **forge build** before the Next.js build so the artifact exists when the API runs.
+- Options:
+  - **prebuild**: In `package.json`, add a `"prebuild": "forge build"` (or a small script that runs `forge build` from repo root). Then `bun run build` will compile the contract first.
+  - **CI**: In CI, run `forge build` (or your script) before `bun run build`.
+
+Ensure `contracts/out/Escrow.sol/Escrow.json` is present when the deploy route runs (locally and in production).
+
+---
+
+## 6. When to deploy (trigger)
+
+- **When a freelancer accepts a task**:  
+  When you create the contract record (e.g. from an accepted proposal), call `POST /api/deploy-escrow` with payer, payee, and amountWei (and token if applicable).  
+  Store the returned `contractAddress` in that contract’s `contractSpecs` (e.g. `[{ network: "polygon", escrowAddress }]`).
+
+- **Alternative**: Deploy when the user clicks “Activate contract” on the contract detail page; same API call and same persistence.
+
+See **docs/hiring-flow-roadmap.md** (e.g. “When creating a contract from an accepted proposal… call POST /api/deploy-escrow… Store the returned contractAddress in the contract’s contractSpecs”).
+
+---
+
+## 7. Checklist
+
+- [ ] Create `contracts/` and copy `Escrow.sol` (and any dependencies) from the other Forge project.
+- [ ] Copy or add `foundry.toml` (and remappings if needed) at repo root.
+- [ ] Run `forge build` and confirm `contracts/out/Escrow.sol/Escrow.json` exists.
+- [ ] Add `lib/escrow-artifact.ts` that exports ABI and bytecode from that JSON.
+- [ ] Update `app/api/deploy-escrow/route.ts` to use the artifact instead of `ESCROW_BYTECODE`; align constructor args with your Solidity contract.
+- [ ] Add a prebuild or CI step so `forge build` runs before `bun run build`.
+- [ ] In the “freelancer accepts task” (or “Activate contract”) flow, call `POST /api/deploy-escrow` and persist `contractAddress` in the contract’s `contractSpecs`.
+
+---
+
+## 8. Summary
+
+- **Copy**: Escrow source + Foundry config (and remappings) into this repo; build here with `forge build`.
+- **Deploy with viem**: Use `walletClient.deployContract()` with ABI and bytecode from the artifact; same relayer and chain as `execute-safe-tx`.
+- **Trigger**: When a freelance accepts a task (or contract is activated), call the deploy API and save `escrowAddress` in `contractSpecs`.
+- **No bytecode in env**: Load ABI and bytecode from `contracts/out/...` via `lib/escrow-artifact.ts`.

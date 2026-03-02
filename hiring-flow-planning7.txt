@@ -1,0 +1,133 @@
+# Phase 7: Delivery & Fund Release — Implementation Plan
+
+Reference: docs/hiring-flow-roadmap.md, Phase 7 (Tasks 7.1–7.4)
+
+Goal: Freelancer can mark work as delivered; both payer and payee confirm acceptance; then funds are released from escrow to the payee. Contract status moves to "completed".
+
+Prerequisites: Phase 6 complete. Contracts exist with escrow deployed and optionally funded (status "in_progress" or similar). Contract detail page at /contract/[contractId] and ContractActivation component exist.
+
+================================================================================
+TASK 7.1 — Delivery submission (freelancer)
+================================================================================
+
+Files to create:
+  - app/api/contracts/[contractId]/delivery/route.ts
+
+Files to reference:
+  - types/contract.ts (contractDeliverables)
+  - types/active_contract_page.ts (contractDeliverables schema)
+
+Steps:
+  1) Define delivery payload: e.g. { description: string, uploadId?: string } or array of deliverables (name, description, uploadId, status).
+  2) Implement POST /api/contracts/[contractId]/delivery: load contract by id; verify caller is payee (freelancer). Append or set contractDeliverables; optionally set a "deliverySubmitted" flag or status like "pending_acceptance". Persist and return updated contract.
+  3) Consider idempotency: allow multiple delivery submissions (e.g. add milestone) or single "delivery submitted" per contract—align with product.
+
+Acceptance:
+  - Freelancer can submit delivery for a contract; contract record holds deliverables and reflects pending acceptance.
+
+================================================================================
+TASK 7.2 — Dual confirmation (payer and payee accept)
+================================================================================
+
+Files to create:
+  - app/api/contracts/[contractId]/accept/route.ts
+
+Files to modify:
+  - types/contract.ts (payer_acceptance, payee_acceptance already exist)
+
+Steps:
+  1) Implement POST /api/contracts/[contractId]/accept with body { role: "payer" | "payee" }. Verify caller address matches contract.payer (for role "payer") or contract.payee (for role "payee"). Set payer_acceptance or payee_acceptance to true. Persist and return contract.
+  2) When both payer_acceptance and payee_acceptance are true, contract is "ready for release". Optionally set status to "pending_release" or leave status as "in_progress" until release API is called.
+
+Acceptance:
+  - Payer and payee can each confirm delivery; both flags stored on contract; release only allowed when both true.
+
+================================================================================
+TASK 7.3 — Release funds from escrow
+================================================================================
+
+Files to create:
+  - app/api/contracts/[contractId]/release/route.ts
+
+Files to reference:
+  - app/api/deploy-escrow/abi.json (release method: releaseToFreelancer or similar)
+  - app/api/execute-safe-tx/route.ts or relayer pattern
+
+Steps:
+  1) Implement POST /api/contracts/[contractId]/release (or trigger from client). Load contract; verify both payer_acceptance and payee_acceptance are true; read contractSpecs[0].escrowAddress and network.
+  2) Call escrow contract's release method (e.g. releaseToFreelancer()) so funds go to payee. Use relayer (RELAYER_PRIVATE_KEY) if release must be executed server-side, or return tx params for client/Safe execution.
+  3) On successful on-chain release, PATCH contract status to "completed". Persist.
+
+Acceptance:
+  - Funds move from escrow to freelancer; contract status becomes "completed".
+
+================================================================================
+TASK 7.4 — Delivery and confirmation UI
+================================================================================
+
+Files to modify:
+  - components/pages/ContractActivation.tsx (or new ContractDelivery.tsx)
+  - app/(dashboard)/contract/[contractId]/page.tsx
+
+Files to reference:
+  - components/pages/Contract.tsx (existing delivery panel and "Confirm & Release Funds" button)
+
+Steps:
+  1) On contract detail page, when status is "in_progress": show delivery section. If payee (freelancer), show form to submit delivery (description, optional file/uploadId). Call POST /api/contracts/[id]/delivery on submit.
+  2) Show contractDeliverables (list of deliverables with name, description, status). For payer and payee: show "Confirm delivery" button that calls POST /api/contracts/[id]/accept with { role: "payer" } or { role: "payee" }. Display current payer_acceptance and payee_acceptance state.
+  3) When both acceptances are true: show "Release funds" button. On click, call POST /api/contracts/[id]/release. Show success and updated status "completed".
+  4) Reuse or adapt styling from existing Contract.tsx delivery panel (milestone summary, attached assets, on-chain evidence, Confirm & Release Funds).
+
+Acceptance:
+  - Full flow visible in UI: submit delivery → confirm (both sides) → release funds → completed.
+
+================================================================================
+IMPLEMENTATION ORDER
+================================================================================
+
+1. Task 7.1 — Delivery API and contractDeliverables update.
+2. Task 7.2 — Accept API (payer/payee confirmation).
+3. Task 7.3 — Release API (escrow release + status completed).
+4. Task 7.4 — UI: delivery form, confirm buttons, release button on contract detail page.
+
+================================================================================
+DECISIONS & NOTES
+================================================================================
+
+- Escrow ABI: abi.json has approveCustomer() and approveFreelancer() (no args); when both are true, contract can release. customerApproved() and freelancerApproved() are view functions. resolve is via these approve calls (no separate "release" method—approving both sides triggers release to freelancer). Check for resolve() or internal release logic.
+- Who may call release: Typically any party once both have accepted, or only payer. Document in API.
+- contractDeliverables: types/contract.ts already has optional contractDeliverables array; align shape with Icontract_schema (name, description, uploadId, status).
+- Contract.tsx: Current component is chat + delivery panel with mock data; Phase 7 can either replace the delivery panel with real data from GET /api/contracts/[id] or keep ContractActivation as the single contract detail view and add delivery/accept/release sections there.
+
+================================================================================
+IMPLEMENTATION SUMMARY (completed)
+================================================================================
+
+7.1 Delivery API (app/api/contracts/[contractId]/delivery/route.ts)
+  - POST body: { description, name?, uploadId?, walletAddress } (caller identity via body.walletAddress or x-wallet-address header).
+  - Only payee (freelancer) can submit; contract must be in_progress.
+  - Appends one deliverable to contractDeliverables (name, description, uploadId?, status: "pending"). Multiple submissions allowed (append-only).
+  - types/contract.ts: ContractDeliverableSchema.uploadId made optional.
+
+7.2 Accept API (app/api/contracts/[contractId]/accept/route.ts)
+  - POST body: { role: "payer" | "payee", walletAddress? }. Caller must match contract.payer (for role "payer") or contract.payee (for role "payee").
+  - Sets payer_acceptance or payee_acceptance to true. Status left as "in_progress"; release allowed when both true.
+
+7.3 Release API (app/api/contracts/[contractId]/release/route.ts)
+  - Escrow has approveCustomer() and approveFreelancer() (no separate release method). When both are called on-chain, funds release to freelancer.
+  - POST returns { escrowAddress, network, action: "approveCustomer" | "approveFreelancer" } for the caller so the client can build the on-chain tx (Safe or EOA). Server does not call escrow (caller must be payer or payee for the respective method).
+  - Optional body.markCompleted: true — server reads escrow.resolved() via viem publicClient; if true, updates contract status to "completed".
+  - Caller identity: body.walletAddress or x-wallet-address header.
+
+7.4 UI (components/pages/ContractActivation.tsx)
+  - When status is "in_progress": deliverables list; payee-only delivery form (title optional, description, submit → POST delivery).
+  - Confirm delivery: shows payer_acceptance / payee_acceptance; "Confirm delivery (customer)" / "(freelancer)" buttons → POST accept with { role, walletAddress }.
+  - When both accepted: "Confirm on chain & release" button. Calls POST release → gets escrowAddress + action → useExecuteSafeTx(encodeFunctionData(approveCustomer | approveFreelancer)) → then POST release with markCompleted: true to set status "completed" (backend checks resolved()).
+  - Completed state: "Contract completed · Funds released" message.
+
+Caution / non-obvious:
+  - Release is two-step on-chain: payer must call approveCustomer(), payee must call approveFreelancer(). Either party can trigger the release API to get their action; the UI triggers the current user's action via Safe. After the second on-chain approval, contract is resolved; markCompleted relies on backend reading resolved() (may need a short delay or retry if tx just mined).
+  - All three new APIs require caller wallet address (body.walletAddress or header). ContractActivation passes eoaAddress in the body.
+  - Contract list page (app/(dashboard)/contract/page.tsx) was not modified; contract detail is the single place for delivery/accept/release.
+
+Roadmap (docs/hiring-flow-roadmap.md) ends at Phase 7; no Phase 8 planning document created.

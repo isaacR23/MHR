@@ -1,0 +1,113 @@
+# Phase 4: Proposal Submission — Implementation Plan
+
+Reference: docs/hiring-flow-roadmap.md, Phase 4 (Tasks 4.1–4.3)
+
+Goal: From the chat thread, the customer can send a proposal (description, price, deadline). Proposals are stored and listed by thread. Both customer and freelancer see proposals in the chat (inline or sidebar).
+
+Prerequisites: Phase 3 complete. Chat thread exists at /chat/[threadId]; threadId is tied to a gig and customer+freelancer.
+
+================================================================================
+DATA MODEL
+================================================================================
+
+Proposal:
+  - id: string (e.g. UUID)
+  - threadId: string
+  - gigId: string
+  - customerId: string (customer address)
+  - freelancerId: string (from gig / quote-request)
+  - description: string
+  - price: number (or string for display; API can use number)
+  - deadline: string (ISO date)
+  - status: "pending" | "accepted" | "rejected"
+  - createdAt: string (ISO)
+
+Store: JSON file app/api/proposals/proposals.json (array) or Redis. GET /api/proposals?threadId=... returns list for thread.
+
+================================================================================
+TASK 4.1 — Proposal data model and API
+================================================================================
+
+Files to create:
+  - types/proposal.ts (Proposal type, zod schema if desired)
+  - app/api/proposals/route.ts (GET by threadId, POST to create)
+  - app/api/proposals/proposals.json (optional; empty array)
+
+Steps:
+  1) Define Proposal type in types/proposal.ts (id, threadId, gigId, customerId, freelancerId, description, price, deadline, status, createdAt).
+  2) POST /api/proposals: body { threadId, gigId, customerId, freelancerId, description, price, deadline }. Generate id and createdAt, status "pending". Persist; return { proposal }.
+  3) GET /api/proposals?threadId=...: return { proposals: Proposal[] } for that thread.
+  4) Persistence: read/write proposals.json (same pattern as quote-request).
+
+Acceptance:
+  - POST creates proposal; GET returns proposals for thread.
+
+================================================================================
+TASK 4.2 — Proposal form in chat UI
+================================================================================
+
+Files to create:
+  - components/ProposalForm.tsx
+
+Files to modify:
+  - components/pages/ChatThread.tsx
+
+Steps:
+  1) ProposalForm: form with description (textarea), price (number input), deadline (date picker). Props: threadId, gigId, customerId, freelancerId (or fetch from thread metadata), onSuccess callback.
+  2) On submit: POST /api/proposals with threadId, gigId, customerId, freelancerId, description, price, deadline. On success call onSuccess(proposal) and close or reset form.
+  3) In ChatThread: add "Send proposal" entry point (button or section). When customer (need to know if current user is customer vs freelancer: compare eoaAddress to quote-request customerAddress for this thread), show ProposalForm. Use shadcn Form, Input, Textarea, and date picker (e.g. Calendar + Popover or input type="date").
+
+Acceptance:
+  - Customer can open proposal form in chat and submit; proposal is created and listed.
+
+================================================================================
+TASK 4.3 — Show proposals in chat
+================================================================================
+
+Files to modify:
+  - components/pages/ChatThread.tsx
+
+Steps:
+  1) Fetch proposals: GET /api/proposals?threadId=... when ChatThread loads. Store in state.
+  2) Display: render proposals in a sidebar or inline in the message area (e.g. as special cards between or after messages). Each card shows description, price, deadline, status. Order by createdAt.
+  3) After submitting a new proposal (onSuccess), append to local state or refetch so it appears immediately.
+
+Acceptance:
+  - Both parties see proposals for the thread; new proposals appear after submit.
+
+================================================================================
+IMPLEMENTATION ORDER
+================================================================================
+
+1. Task 4.1 — Proposal type and API (POST + GET).
+2. Task 4.2 — ProposalForm and integration in ChatThread (customer-only for form).
+3. Task 4.3 — Fetch and display proposals in ChatThread.
+
+================================================================================
+DECISIONS & NOTES
+================================================================================
+
+- customerId / freelancerId: From quote-request record for this thread (GET thread metadata could be extended to return customerAddress and freelancerId) or from current user (eoaAddress) and thread metadata (freelancerId). For POST proposal, customerId = current user address, freelancerId = from thread metadata.
+- Who can send proposal: Customer only (roadmap: "From the chat, the customer can send a proposal"). ChatThread can determine "isCustomer" by comparing eoaAddress to the thread's customer (from quote-request); thread metadata API may need to return customerAddress so the client can show/hide the proposal form.
+- Optional: extend GET /api/quote-request/thread/[threadId] to return customerAddress so the client can hide "Send proposal" for the freelancer.
+
+================================================================================
+IMPLEMENTATION DETAILS (completed)
+================================================================================
+
+Task 4.1:
+  - types/proposal.ts: Proposal type + ProposalSchema (zod), CreateProposalBodySchema for POST validation. Status enum: "pending" | "accepted" | "rejected".
+  - app/api/proposals/route.ts: GET ?threadId= returns proposals for thread (sorted by createdAt). POST validates body with CreateProposalBodySchema, generates id (randomUUID), createdAt (ISO), status "pending", appends to proposals.json, returns { proposal }.
+  - app/api/proposals/proposals.json: initial empty array [].
+  - Thread metadata extended: GET /api/quote-request/thread/[threadId] now returns customerAddress and freelancerId so the client can determine isCustomer and pass customerId/freelancerId to ProposalForm.
+
+Task 4.2:
+  - components/ProposalForm.tsx: react-hook-form + zodResolver with formSchema (description, price as number, deadline as string). Props: threadId, gigId, customerId, freelancerId, onSuccess(proposal), onCancel (optional). Uses shadcn Form, FormField, FormItem, FormLabel, FormControl, FormMessage, Input, Textarea. Deadline uses <Input type="date">. On submit: POST /api/proposals; on success calls onSuccess(proposal) and reset(); root error displayed on failure.
+  - ChatThread: uses useWallet() for eoaAddress. ThreadMetadata type extended with customerAddress?, freelancerId?. isCustomer = eoaAddress && metadata.customerAddress && normalizeAddress(eoaAddress) === normalizeAddress(metadata.customerAddress). "Send proposal" button shown only when isCustomer && metadata; clicking toggles showProposalForm. ProposalForm rendered in a bordered section with onSuccess appending to proposals state and setShowProposalForm(false).
+
+Task 4.3:
+  - ChatThread: loadProposals() fetches GET /api/proposals?threadId=..., sets proposals state; called in useEffect([threadId]). Proposals section rendered above messages: "Proposals" heading then cards (description, price, deadline, status). Status styled: accepted = green, rejected = text-destructive. New proposal from onSuccess appended to state so it appears immediately.
+
+Caution:
+  - ProposalForm defaultValues use price: 0; formSchema allows positive. User must enter price > 0 or validation fails (intended). deadline is string (date input returns YYYY-MM-DD).
+  - Thread metadata 404 or missing customerAddress/freelancerId: proposal form not shown (isCustomer false or metadata incomplete); ensure quote-request records in quote-requests.json include customerAddress and freelancerId.

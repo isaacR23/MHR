@@ -24,10 +24,23 @@ const Auth = () => {
     if (m === "signup" || m === "signin") setMode(m);
   }, [searchParams]);
 
+  /** Safe redirect: same-origin path only (no // or protocol). */
+  const getSafeRedirect = (raw: string | null): string | null => {
+    if (raw == null || typeof raw !== "string") return null;
+    const path = raw.trim();
+    if (path.startsWith("/") && !path.startsWith("//")) return path;
+    return null;
+  };
+
   useEffect(() => {
     if (!authLoading && isLoggedIn) {
-      router.replace("/");
+      const redirect = getSafeRedirect(searchParams.get("redirect"));
+      const action = searchParams.get("action");
+      const target = redirect ?? "/";
+      const query = action ? `?action=${encodeURIComponent(action)}` : "";
+      router.replace(target + query);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- redirect/action read from searchParams inside effect
   }, [authLoading, isLoggedIn, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -44,7 +57,11 @@ const Auth = () => {
       await magic.auth.loginWithEmailOTP({ email: trimmed });
       await syncWalletState();
       await refreshWallet();
-      router.push("/");
+      const redirect = getSafeRedirect(searchParams.get("redirect"));
+      const action = searchParams.get("action");
+      const target = redirect ?? "/";
+      const query = action ? `?action=${encodeURIComponent(action)}` : "";
+      router.push(target + query);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Something went wrong. Please try again.";
       setError(message);

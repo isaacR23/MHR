@@ -1,0 +1,105 @@
+# Phase 2: Authentication Gate — Implementation Plan
+
+Reference: docs/hiring-flow-roadmap.md, Phase 2 (Tasks 2.1–2.2)
+
+Goal: When a customer clicks "Request quote" on a gig, unauthenticated users are sent to sign up/log in. After auth, they are returned to that gig page so they can continue to request a quote (Phase 3 will implement the actual quote request and chat unlock).
+
+Prerequisites: Phase 1 complete. GigDetail has a "Request quote" link to /auth?redirect=/gigs/[id]&action=request_quote.
+
+================================================================================
+TASK 2.1 — Auth check and redirect on "Request quote"
+================================================================================
+
+Files to modify:
+  - components/pages/GigDetail.tsx
+
+Files used (no changes):
+  - components/providers/AuthProvider.tsx (useAuth)
+  - app/(public)/gigs/[id]/page.tsx (no change unless you need to pass searchParams)
+
+Steps:
+
+1) In GigDetail.tsx, use AuthProvider
+   - Import useAuth from @/components/providers/AuthProvider.
+   - Call useAuth() to get isLoggedIn (and optionally isLoading).
+
+2) Replace static "Request quote" link with conditional behavior
+   - If user is not logged in: keep current behavior — the link to /auth?redirect=/gigs/[id]&action=request_quote is correct. Optionally, instead of navigating on click, use router.push() so you can add analytics or ensure redirect URL is exact.
+   - If user is logged in: do not link to /auth. Either:
+     A) Render a Button that for now does nothing (or shows a toast "Quote request coming soon"), and document that Phase 3 will wire it to POST /api/quote-request and redirect to /chat/[threadId], or
+     B) Navigate to a "request quote" handler that will be implemented in Phase 3 (e.g. router.push(`/gigs/${gigId}/request-quote`) or call an API and redirect to chat).
+   - Recommended for Phase 2: Keep the same CTA label "Request quote". If logged in, change the button to a client-side action that will in Phase 3 call the quote-request API and redirect; for now that action can be a no-op or toast so the flow is "logged in → click → (Phase 3: request quote + go to chat)".
+
+3) Optional: loading state for auth
+   - If useAuth().isLoading is true, show a disabled button or skeleton for the CTA so the user does not briefly see "Sign In" then "Request quote" flicker.
+
+Acceptance:
+   - Logged-out user clicks "Request quote" → goes to /auth with redirect and action set.
+   - Logged-in user sees "Request quote" and clicking it does not go to /auth (Phase 3 will implement the actual quote request).
+
+================================================================================
+TASK 2.2 — Post-login return to gig and action
+================================================================================
+
+Files to modify:
+  - app/(auth)/auth/page.tsx (if needed for passing searchParams)
+  - components/pages/Auth.tsx
+
+Steps:
+
+1) Read redirect and action from URL after login
+   - In Auth.tsx, after successful magic.auth.loginWithEmailOTP and syncWalletState/refreshWallet, read searchParams (or useSearchParams): redirect, action.
+   - If redirect is present (e.g. /gigs/smart-contract-audit), navigate to redirect instead of router.push("/"). Preserve action in the URL when redirecting so the gig page can use it: e.g. router.push(redirect + (action ? `?action=${action}` : '')) or just router.push(redirect) and keep action in the redirect URL as-is (redirect may already contain query params from Phase 1 link).
+
+2) Ensure redirect URL is safe
+   - Validate that redirect is a path (starts with /) and does not point to another origin. Simple check: redirect.startsWith("/") && !redirect.startsWith("//"). If invalid, fall back to "/".
+
+3) Gig page: optional auto-trigger from action
+   - In GigDetail, if the URL has action=request_quote (e.g. from useSearchParams) and user is logged in, you can optionally auto-focus the "Request quote" button or show a one-time message ("You can now request a quote"). Full auto-trigger (calling the quote API and redirecting to chat) is Phase 3; here you only need to land the user on the gig page with action in URL so they can click "Request quote" once Phase 3 is implemented.
+
+Acceptance:
+   - User clicks "Request quote" on /gigs/123 → /auth?redirect=/gigs/123&action=request_quote → logs in → is redirected to /gigs/123 (with or without ?action=request_quote).
+   - User can then click "Request quote" again (Phase 3 will create quote and open chat).
+
+================================================================================
+IMPLEMENTATION ORDER
+================================================================================
+
+1. Task 2.2 first (or in parallel): Auth.tsx redirect-after-login so that when we send users to /auth, they come back to the gig.
+2. Task 2.1: GigDetail auth check and conditional CTA (link to auth vs logged-in behavior).
+
+================================================================================
+DECISIONS & NOTES
+================================================================================
+
+- GigDetail is a client component; useAuth() and useSearchParams() are available. No need to change the page.tsx unless you want to pass searchParams from server (e.g. for SSR redirect URL).
+- Redirect safety: only allow paths on the same origin. Reject redirects like "//evil.com" or "https://...".
+- Phase 3 will add: POST /api/quote-request, threadId, and redirect to /chat/[threadId]. Phase 2 only ensures "request quote" sends unauthenticated users to auth and brings them back to the gig.
+
+================================================================================
+IMPLEMENTATION DETAILS (POST-DEVELOPMENT)
+================================================================================
+
+Completed: Phase 2 execution
+
+Files modified:
+  - components/pages/Auth.tsx
+  - components/pages/GigDetail.tsx
+
+Auth.tsx:
+  - Added getSafeRedirect(raw): returns path only if raw is a string, trim, startsWith("/") && !startsWith("//"); else null.
+  - In useEffect (when !authLoading && isLoggedIn): read redirect and action from searchParams, compute target = redirect ?? "/", query = action ? "?action=" + encodeURIComponent(action) : "", router.replace(target + query). Dependency array: [authLoading, isLoggedIn, router] (searchParams omitted to avoid unnecessary reruns; redirect/action read inside effect).
+  - In handleSubmit after successful login: same redirect/action logic, router.push(target + query) instead of router.push("/").
+
+GigDetail.tsx:
+  - Import useAuth and toast (sonner). useAuth() for isLoggedIn and isLoading (as authLoading).
+  - Primary CTA: if authLoading show disabled Button "Request quote"; if isLoggedIn show Button with onClick={handleRequestQuote}; else show Link to requestQuoteHref (auth with redirect).
+  - handleRequestQuote: toast.info("Quote request coming soon. Phase 3 will open the chat."). Phase 3 will replace with POST /api/quote-request and redirect to /chat/[threadId].
+
+Technical notes:
+  - AuthProvider wraps app in providers.tsx, so GigDetail (under (public)) has access to useAuth().
+  - Sonner is in Providers; toast from "sonner" works globally.
+  - Redirect safety: getSafeRedirect rejects "//evil.com" and any non-path; no protocol or host allowed.
+
+Cautions:
+  - If Auth redirect effect runs before searchParams is ready, redirect/action may be empty; in practice useSearchParams() is available on first client render. No change to auth page.tsx (searchParams come from useSearchParams in Auth.tsx).

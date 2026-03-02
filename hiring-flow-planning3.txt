@@ -1,0 +1,167 @@
+# Phase 3: Quote Request & Chat Unlock — Implementation Plan
+
+Reference: docs/hiring-flow-roadmap.md, Phase 3 (Tasks 3.1–3.4)
+
+Goal: When a logged-in customer clicks "Request quote" on a gig, create a quote-request record and a stable chat thread; redirect to a dedicated chat page. Chat is keyed by threadId. Returning users who already requested a quote see "Open conversation" on the gig page.
+
+Prerequisites: Phase 1 (gigs, detail) and Phase 2 (auth gate, redirect after login). GigDetail shows "Request quote" button for logged-in users (currently toasts; Phase 3 wires to API + redirect).
+
+================================================================================
+DATA MODEL
+================================================================================
+
+Quote request (one per gig + customer):
+  - gigId: string
+  - customerAddress: string (from useWallet / Magic)
+  - freelancerId: string (from gig.freelancerId)
+  - threadId: string (stable id for chat; e.g. crypto.randomUUID() or slug like gigId_customerAddress)
+  - createdAt: string (ISO)
+
+Store in JSON file (e.g. app/api/quote-request/quote-requests.json) as array, or Redis key quote_request:<gigId>:<customerAddress> with value { threadId, freelancerId, createdAt }. For Phase 3, JSON is acceptable: array of { gigId, customerAddress, freelancerId, threadId, createdAt }.
+
+Chat thread: keyed by threadId. Existing chat API uses sessionId; extend to accept threadId and persist messages under chat:<threadId> (or keep sessionId as alias for threadId when coming from quote flow).
+
+================================================================================
+TASK 3.1 — Quote request API and persistence
+================================================================================
+
+Files to create:
+  - app/api/quote-request/route.ts (GET and POST)
+  - app/api/quote-request/quote-requests.json (optional; or in-memory for dev)
+
+Steps:
+
+1) POST /api/quote-request
+   - Body: { gigId: string, customerAddress: string }. Optionally accept freelancerId in body or resolve from gig (read gigs.json to get gig by gigId, take freelancerId).
+   - Normalize addresses (lowercase, 0x prefix).
+   - Check if a quote request already exists for this gigId + customerAddress (idempotent). If yes, return { threadId, alreadyRequested: true }.
+   - Otherwise generate threadId (e.g. crypto.randomUUID() or slug from gigId + customerAddress).
+   - Persist: append to quote-requests.json or set Redis key. Store { gigId, customerAddress, freelancerId, threadId, createdAt }.
+   - Return { threadId }.
+
+2) GET /api/quote-request
+   - Query: gigId, customerAddress. Return { hasRequested: boolean, threadId?: string } (threadId only if hasRequested).
+
+3) Persistence
+   - Use path.join(process.cwd(), "app", "api", "quote-request", "quote-requests.json"). Read/write array; lock or single-threaded writes. For simplicity, read file, parse, push new item, write back. Handle file-not-found as empty array.
+
+Acceptance:
+   - POST with gigId + customerAddress creates record and returns threadId; second POST returns same threadId.
+   - GET ?gigId=...&customerAddress=... returns hasRequested and threadId when applicable.
+
+================================================================================
+TASK 3.2 — Chat tied to gig and participants
+================================================================================
+
+Files to modify:
+  - app/api/chat/route.ts
+  - lib/chat.ts
+
+Steps:
+
+1) Chat API (route.ts)
+   - GET: accept either sessionId or threadId (query). If threadId present, use key chat:<threadId>; else keep existing sessionId key chat:<sessionId>. Return { messages }.
+   - POST: accept sessionId or threadId in body. Same key rule. Store messages under that key. (Existing logic: append user + assistant message; use Mistral or fallback replies.)
+   - No participant validation in Phase 3 (optional later: ensure caller is customer or freelancer for that thread).
+
+2) lib/chat.ts
+   - Add fetchChatHistoryByThreadId(threadId) and sendChatMessageToThread(threadId, message) that call /api/chat with threadId. Keep existing session-based helpers for backward compatibility (contract page may still use sessionId).
+
+Acceptance:
+   - GET /api/chat?threadId=xyz and POST with { threadId, message } persist and retrieve messages per thread.
+   - Existing sessionId-based chat still works if other pages use it.
+
+================================================================================
+TASK 3.3 — Chat page unlocked by quote request
+================================================================================
+
+Files to create:
+  - app/(dashboard)/chat/[threadId]/page.tsx
+  - components/pages/ChatThread.tsx
+
+Files to consider:
+  - Dashboard layout wraps with AppLayout; /chat/[threadId] will have sidebar. If you want chat to be minimal (no dashboard), use a different route group or layout; roadmap says (dashboard) so use it.
+
+Steps:
+
+1) Create app/(dashboard)/chat/[threadId]/page.tsx
+   - Async server component: await params, get threadId. Render <ChatThread threadId={threadId} />. Optionally fetch thread metadata (e.g. from quote-request or a new GET /api/quote-request/thread/[threadId]) to show gig title in header; or pass only threadId and let ChatThread fetch metadata client-side.
+
+2) Create components/pages/ChatThread.tsx (client)
+   - Props: threadId: string.
+   - Fetch messages: GET /api/chat?threadId=... (use lib/chat fetchChatHistoryByThreadId or direct fetch). Loading and error states.
+   - Optional: resolve threadId to gig info (e.g. GET /api/quote-request/thread/[threadId] returning { gigId, gigTitle, freelancerName }) for header. If no such API, show "Chat" or "Conversation" in header.
+   - Render message list and input. On send: POST /api/chat with { threadId, message }; append to local state or refetch.
+   - If threadId is invalid (e.g. 404 from chat or quote-request), show "Request quote first" or 404 and link to gig list.
+
+3) GigDetail: after successful quote request, redirect to /chat/[threadId]
+   - In handleRequestQuote: call POST /api/quote-request with { gigId, customerAddress }. Get customerAddress from useWallet (e.g. walletAddress or equivalent). On success, router.push(/chat/${data.threadId}).
+
+Acceptance:
+   - Logged-in user clicks "Request quote" on gig → POST quote-request → redirect to /chat/[threadId]. Chat loads and sends messages by threadId.
+   - Chat header shows gig context if API provides it.
+
+================================================================================
+TASK 3.4 — Link from gig detail to chat after quote request
+================================================================================
+
+Files to modify:
+  - components/pages/GigDetail.tsx
+
+Steps:
+
+1) On gig detail load, if user is logged in, check if they already requested a quote
+   - Call GET /api/quote-request?gigId=<gig.id>&customerAddress=<current user address>. Use useWallet for address.
+   - If response hasRequested && threadId: show secondary CTA "Open conversation" (or "Go to chat") linking to /chat/[threadId]. Optionally show instead of or in addition to "Request quote" (e.g. "Request quote" only when !hasRequested; when hasRequested show "Open conversation").
+
+2) Button logic
+   - If hasRequested: primary CTA can be "Open conversation" -> /chat/[threadId]. Keep "Request quote" hidden or as secondary (idempotent POST returns same threadId so either is fine; "Open conversation" is clearer for returning users).
+
+Acceptance:
+   - User who already requested a quote sees "Open conversation" and can go straight to chat from the gig page.
+
+================================================================================
+IMPLEMENTATION ORDER
+================================================================================
+
+1. Task 3.1 — Quote request API (POST + GET) and persistence.
+2. Task 3.2 — Chat API and lib/chat extended for threadId.
+3. Task 3.3 — Chat page and ChatThread; GigDetail handleRequestQuote calls POST quote-request and redirects to /chat/[threadId].
+4. Task 3.4 — GigDetail: GET quote-request, show "Open conversation" when hasRequested.
+
+================================================================================
+DECISIONS & NOTES
+================================================================================
+
+- customerAddress: From useWallet() in the app; ensure WalletProvider exposes the logged-in user's Ethereum address (Magic wallet). If address is not yet available when "Request quote" is clicked, show a short message or disable button until wallet is ready.
+- threadId format: UUID is simplest and avoids collisions; slug (gigId_customerAddress) is readable but ensure sanitization. Prefer UUID for API return.
+- Chat under (dashboard): User will see AppLayout (sidebar) on /chat/[threadId]. If product wants a minimal chat-only layout, add (chat) route group with its own layout later.
+- Optional: GET /api/quote-request/thread/[threadId] to return { gigId, gigTitle, freelancerName } for chat header; implement if you want rich header without passing gigId from GigDetail to chat URL.
+
+================================================================================
+IMPLEMENTATION DETAILS (POST-DEVELOPMENT)
+================================================================================
+
+Completed: Phase 3 execution
+
+Files created:
+  - app/api/quote-request/quote-requests.json (empty array)
+  - app/api/quote-request/route.ts (GET: gigId + customerAddress -> hasRequested, threadId; POST: create or return existing threadId, resolve freelancerId from gigs.json)
+  - app/api/quote-request/thread/[threadId]/route.ts (GET: metadata gigTitle, freelancerName for chat header)
+  - app/(dashboard)/chat/[threadId]/page.tsx (async page, passes threadId to ChatThread)
+  - components/pages/ChatThread.tsx (fetch messages by threadId, optional thread metadata, send via sendChatMessageToThread)
+
+Files modified:
+  - app/api/chat/route.ts — getChatKey(request, body?) returns chat:<threadId> or chat:<sessionId>; GET/POST accept either threadId or sessionId
+  - lib/chat.ts — fetchChatHistoryByThreadId(threadId), sendChatMessageToThread(threadId, message)
+  - components/pages/GigDetail.tsx — useWallet (eoaAddress, walletLoading); hasRequested/threadId state via GET quote-request; handleRequestQuote POST then router.push(/chat/threadId); "Open conversation" when hasRequested && threadId; requestQuotePending and wallet not ready toast
+
+Technical notes:
+  - Quote request persistence: JSON file at app/api/quote-request/quote-requests.json; loadQuoteRequests/saveQuoteRequests read/write array. No Redis.
+  - Chat: still uses Redis when available; key is chat:<threadId> or chat:<sessionId>. Contract page unchanged (sessionId).
+  - customerAddress normalized to lowercase with 0x in API; GigDetail sends eoaAddress.toLowerCase().
+  - Thread metadata API enables chat header to show gig title and freelancer without storing in URL.
+
+Cautions:
+  - quote-requests.json is written from API only; concurrent POSTs could race. For production consider Redis or DB.
+  - Chat without Redis: GET returns []; POST still returns updated messages in response but does not persist (existing behavior). Thread chat will lose history if Redis is down.

@@ -1,7 +1,10 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Lock, TrendingUp, Download, Plus, Shield, CheckCircle, Clock } from "lucide-react";
+import { Lock, TrendingUp, Download, Shield, CheckCircle, Clock, ExternalLink, Loader2 } from "lucide-react";
+import { useSafeDeployment } from "@/hooks/useSafeDeployment";
+import { buildOnramperFundSafeUrl } from "@/lib/onramper";
+import { Button } from "@/components/ui/button";
 
 const transactions = [
   {
@@ -47,6 +50,16 @@ const transactions = [
 ];
 
 const Funding = () => {
+  const { safeAddress, isLoading: safeLoading } = useSafeDeployment();
+  const handleFundAccount = () => {
+    if (!safeAddress) return;
+    const url = buildOnramperFundSafeUrl({
+      walletAddress: safeAddress,
+      defaultAmount: 100,
+    });
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
   return (
     <div className="p-8 max-w-4xl mx-auto space-y-8">
       <motion.div
@@ -102,7 +115,7 @@ const Funding = () => {
         </div>
       </motion.div>
 
-      {/* Funding Gateway */}
+      {/* Funding Gateway — Onramper: USDC on Polygon to SAFE */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -111,36 +124,35 @@ const Funding = () => {
       >
         <h2 className="text-lg font-bold text-foreground">Funding Gateway</h2>
         <div className="border border-border bg-card p-6">
-          <div className="flex flex-col md:flex-row gap-4 items-end">
-            <div className="flex-1 space-y-2">
-              <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-medium">
-                Amount (USD)
-              </label>
-              <div className="flex items-center bg-background border border-border px-4 py-3">
-                <span className="text-muted-foreground text-sm mr-2">$</span>
-                <input
-                  type="text"
-                  placeholder="0.00"
-                  className="bg-transparent text-sm text-foreground outline-none flex-1"
-                />
-              </div>
-            </div>
-            <div className="flex-1 space-y-2">
-              <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-medium">
-                Funding Source
-              </label>
-              <select className="w-full bg-background border border-border px-4 py-3 text-sm text-foreground outline-none appearance-none">
-                <option>Bank Account (**** 4291)</option>
-                <option>Wire Transfer</option>
-              </select>
-            </div>
-            <button className="bg-primary text-primary-foreground px-6 py-3 text-xs font-bold uppercase tracking-wide hover:opacity-90 transition-opacity flex items-center gap-2 whitespace-nowrap">
-              <Plus className="size-4" />
-              Add Capital
-            </button>
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-muted-foreground">
+              Fund your SAFE with USDC on Polygon. Payment in USD; funds are sent to your Safe wallet address.
+            </p>
+            <Button
+              onClick={handleFundAccount}
+              disabled={!safeAddress || safeLoading}
+              className="w-fit"
+            >
+              {safeLoading ? (
+                <>
+                  <Loader2 className="size-4 animate-spin mr-2" />
+                  Loading…
+                </>
+              ) : (
+                <>
+                  <ExternalLink className="size-4 mr-2" />
+                  Fund account
+                </>
+              )}
+            </Button>
+            {!safeAddress && !safeLoading && (
+              <p className="text-xs text-muted-foreground">
+                Connect your wallet and ensure your Safe is set up to fund your account.
+              </p>
+            )}
           </div>
           <p className="text-xs text-muted-foreground mt-3 italic">
-            Infrastructure abstraction active. Assets are automatically converted and secured via smart contract protocol.
+            Opens Onramper in a new tab. Buy USDC with USD (card); it will be sent to your SAFE on Polygon.
           </p>
         </div>
       </motion.div>

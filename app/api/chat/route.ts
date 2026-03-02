@@ -56,12 +56,20 @@ async function getMistralReply(
   }
 }
 
+function getChatKey(request: NextRequest, body?: { sessionId?: string; threadId?: string }): string | null {
+  const threadId = body?.threadId ?? request.nextUrl.searchParams.get("threadId");
+  if (threadId?.trim()) return `${CHAT_KEY_PREFIX}${threadId.trim()}`;
+  const sessionId = body?.sessionId ?? request.nextUrl.searchParams.get("sessionId");
+  if (sessionId?.trim()) return `${CHAT_KEY_PREFIX}${sessionId.trim()}`;
+  return null;
+}
+
 export async function GET(request: NextRequest) {
   try {
-    const sessionId = request.nextUrl.searchParams.get("sessionId");
-    if (!sessionId) {
+    const key = getChatKey(request);
+    if (!key) {
       return NextResponse.json(
-        { error: "sessionId is required" },
+        { error: "sessionId or threadId is required" },
         { status: 400 }
       );
     }
@@ -74,7 +82,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const raw = await redis.get<string>(`${CHAT_KEY_PREFIX}${sessionId}`);
+    const raw = await redis.get<string>(key);
     const messages: ChatMessage[] = (() => {
       if (raw == null) return [];
       if (Array.isArray(raw)) return raw as ChatMessage[];
@@ -101,19 +109,22 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const sessionId = body?.sessionId as string | undefined;
-    const message = body?.message as string | undefined;
+    const body = (await request.json()) as {
+      sessionId?: string;
+      threadId?: string;
+      message?: string;
+    };
+    const message = body?.message;
+    const key = getChatKey(request, body);
 
-    if (!sessionId || typeof message !== "string") {
+    if (!key || typeof message !== "string") {
       return NextResponse.json(
-        { error: "sessionId and message are required" },
+        { error: "sessionId or threadId, and message are required" },
         { status: 400 }
       );
     }
 
     const redis = getRedis();
-    const key = `${CHAT_KEY_PREFIX}${sessionId}`;
 
     const userMessage: ChatMessage = {
       role: "user",

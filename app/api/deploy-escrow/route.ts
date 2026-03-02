@@ -1,16 +1,15 @@
 /**
- * Deploys a new escrow contract instance when a gig is agreed (client + freelancer).
+ * Deploys a new Freelance escrow contract when a gig is agreed (client + freelancer).
  * Uses the same relayer as execute-safe-tx; relayer pays gas.
  *
- * Requires:
- * - RELAYER_PRIVATE_KEY
- * - ESCROW_BYTECODE (hex string from compiled Solidity escrow)
+ * Constructor: _usdc, _freelancer, _customer. USDC defaults to app constant
+ * (Polygon mainnet); override via request body. Amount is not set at deploy—
+ * customer funds later via depositUsdc / depositPol on the deployed contract.
  *
- * Constructor args must match your escrow contract. This route uses a common
- * shape: payer (client), payee (freelancer), amountWei, tokenAddress (or zero for native).
- * Adjust the ABI and body schema to match your contract.
+ * Requires: RELAYER_PRIVATE_KEY
  */
 
+import { getPolygonUsdcAddress } from "@/lib/constants";
 import { NextRequest, NextResponse } from "next/server";
 import {
   createPublicClient,
@@ -22,31 +21,15 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { polygon } from "viem/chains";
 
-const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const;
-
-/** Minimal escrow ABI: constructor only. Adjust to match your Solidity contract. */
-const escrowDeployAbi = [
-  {
-    inputs: [
-      { internalType: "address", name: "payer", type: "address" },
-      { internalType: "address", name: "payee", type: "address" },
-      { internalType: "uint256", name: "amountWei", type: "uint256" },
-      { internalType: "address", name: "token", type: "address" },
-    ],
-    stateMutability: "nonpayable",
-    type: "constructor",
-  },
-] as const;
+import escrowArtifact from "./abi.json";
 
 type DeployEscrowBody = {
-  /** Client (payer) address */
-  payer: string;
   /** Freelancer (payee) address */
-  payee: string;
-  /** Escrow amount in wei (string to avoid JSON number limits) */
-  amountWei: string;
-  /** Token address for ERC20, or omit/zero for native (MATIC) */
-  token?: string;
+  freelancer: string;
+  /** Customer (payer) address */
+  customer: string;
+  /** USDC token address; omit to use app default (Polygon USDC from lib/constants) */
+  usdc?: string;
 };
 
 export async function POST(request: NextRequest) {
@@ -59,27 +42,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const bytecode = process.env.ESCROW_BYTECODE;
-    if (!bytecode || !bytecode.startsWith("0x")) {
-      return NextResponse.json(
-        {
-          error:
-            "ESCROW_BYTECODE not configured. Compile your escrow contract and set ESCROW_BYTECODE (hex string) in .env",
-        },
-        { status: 503 }
-      );
-    }
-
     const body = (await request.json()) as DeployEscrowBody;
-    const { payer, payee, amountWei } = body;
-    if (!payer || !payee || !amountWei) {
+    const { freelancer, customer } = body;
+    if (!freelancer || !customer) {
       return NextResponse.json(
-        { error: "payer, payee, and amountWei are required" },
+        { error: "freelancer and customer are required" },
         { status: 400 }
       );
     }
 
-    const token = (body.token ?? ZERO_ADDRESS) as Hex;
+    const usdc =
+      body.usdc && body.usdc.startsWith("0x")
+        ? (body.usdc as Hex)
+        : getPolygonUsdcAddress();
+
+    const bytecode = (escrowArtifact as { bytecode?: { object?: string } })
+      ?.bytecode?.object;
+    if (!bytecode || !bytecode.startsWith("0x")) {
+      return NextResponse.json(
+        { error: "Escrow artifact missing bytecode.object" },
+        { status: 503 }
+      );
+    }
+
     const privateKey = (
       rawKey.startsWith("0x") ? rawKey : `0x${rawKey}`
     ) as Hex;
@@ -98,10 +83,10 @@ export async function POST(request: NextRequest) {
     });
 
     const txHash = await walletClient.deployContract({
-      abi: escrowDeployAbi,
+      abi: escrowArtifact.abi as readonly unknown[],
       account,
       bytecode: bytecode as Hex,
-      args: [payer as Hex, payee as Hex, BigInt(amountWei), token],
+      args: [usdc, freelancer as Hex, customer as Hex],
     });
 
     const receipt = await publicClient.waitForTransactionReceipt({

@@ -77,3 +77,34 @@ export async function sendChatMessage(
     messages: Array.isArray(data.messages) ? data.messages : [],
   };
 }
+
+export async function fetchChatHistoryByThreadId(
+  threadId: string
+): Promise<ChatMessage[]> {
+  const res = await fetch(
+    `/api/chat?threadId=${encodeURIComponent(threadId)}`
+  );
+  if (!res.ok) return [];
+  const data = await res.json();
+  return Array.isArray(data?.messages) ? data.messages : [];
+}
+
+export async function sendChatMessageToThread(
+  threadId: string,
+  message: string
+): Promise<{ reply: string; messages: ChatMessage[] }> {
+  const res = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ threadId, message: message.trim() }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error ?? "Failed to send message");
+  }
+  const data = await res.json();
+  return {
+    reply: data.reply ?? "",
+    messages: Array.isArray(data.messages) ? data.messages : [],
+  };
+}

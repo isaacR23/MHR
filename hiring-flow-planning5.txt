@@ -1,0 +1,80 @@
+# Phase 5: Proposal Review (Freelancer) — Implementation Plan
+
+Reference: docs/hiring-flow-roadmap.md, Phase 5 (Tasks 5.1–5.2)
+
+Goal: Freelancer can accept or reject proposals from the chat. On accept, optionally create a contract record for the next phase. Accept/Reject UI is visible only to the freelancer (gig owner).
+
+Prerequisites: Phase 4 complete. Proposals exist per thread; proposal cards show in ChatThread with status (pending, accepted, rejected).
+
+================================================================================
+TASK 5.1 — Accept/Reject proposal API
+================================================================================
+
+Files to create:
+  - app/api/proposals/[id]/route.ts
+
+Files to modify (if needed):
+  - app/api/proposals/route.ts (no change required unless shared helpers needed)
+
+Steps:
+  1) Implement PATCH /api/proposals/[id]: body { status: "accepted" | "rejected" }. Validate status.
+  2) Load proposal by id from proposals.json (or shared loadProposals helper). Return 404 if not found.
+  3) Authorization: only the freelancer (gig owner) can accept/reject. Caller must identify themselves (e.g. header or body: freelancerAddress or use session). Compare to proposal.freelancerId (normalize addresses). Return 403 if not the freelancer.
+  4) Only allow status change when current proposal.status === "pending". Return 400 if already accepted/rejected.
+  5) Update proposal status in proposals array, persist to proposals.json. Return { proposal }.
+  6) Optional (Phase 6 prep): On accept, create a contract record (e.g. POST to contracts or write to contracts.json) with status "discovery" or "in_progress", link proposalId/gigId/payer/payee/amount. Return contractId in response so UI can show "Activate contract" linking to next phase. If deferred, just return { proposal }; contract creation can be Phase 6.
+
+Acceptance:
+  - PATCH by id updates status to accepted/rejected only when caller is freelancer and proposal is pending.
+
+================================================================================
+TASK 5.2 — Accept/Reject UI in chat
+================================================================================
+
+Files to create:
+  - components/ProposalCard.tsx
+
+Files to modify:
+  - components/pages/ChatThread.tsx
+
+Steps:
+  1) ProposalCard: receives proposal, threadMetadata (for freelancerId), currentUserAddress (eoaAddress). Renders description, price, deadline, status. If proposal.status === "pending" and currentUserAddress is the freelancer (normalize compare to metadata.freelancerId), show "Accept" and "Reject" buttons.
+  2) On Accept: call PATCH /api/proposals/[id] with body { status: "accepted" }. On success update local proposal state (or refetch proposals) and optionally show success toast. If API returns contractId, show CTA "Activate contract" linking to contract flow (e.g. /contract/[contractId] or placeholder for Phase 6).
+  3) On Reject: call PATCH with { status: "rejected" }; update UI similarly.
+  4) ChatThread: replace inline proposal div with ProposalCard for each proposal. Pass metadata (freelancerId) and eoaAddress so ProposalCard can show buttons only for freelancer.
+
+Acceptance:
+  - Freelancer sees Accept/Reject on pending proposals; customer does not. After accept/reject, proposal state updates and buttons disappear.
+
+================================================================================
+IMPLEMENTATION ORDER
+================================================================================
+
+1. Task 5.1 — PATCH /api/proposals/[id] with auth and persistence.
+2. Task 5.2 — ProposalCard component and integration in ChatThread (freelancer-only buttons).
+
+================================================================================
+DECISIONS & NOTES
+================================================================================
+
+- Auth for PATCH: API can accept freelancerAddress in body (e.g. { status, freelancerAddress }) so the client sends the signer address; no session required. Alternatively use a header. Validate that freelancerAddress (normalized) equals proposal.freelancerId.
+- Contract on accept: Roadmap says "On accept, optionally create a contract record". Phase 6 will add contract API and deposit flow. Option A: create minimal contract record in 5.1 and return contractId. Option B: defer contract creation to Phase 6 "Activate contract" click. Recommend Option A for continuity (contract exists but "awaiting deposit" until Phase 6).
+- ProposalCard: Can be a presentational component that receives onAccept, onReject callbacks (ChatThread does the PATCH and state update) to keep API calls in the page, or ProposalCard can call API and invoke onSuccess callback. Either is fine; prefer callbacks from parent for consistency with ProposalForm.
+
+================================================================================
+IMPLEMENTATION NOTES (post-development)
+================================================================================
+
+Task 5.1:
+  - Created app/api/proposals/[id]/route.ts with PATCH only. Body: { status: "accepted" | "rejected", freelancerAddress: string }. freelancerAddress is required so the API can authorize the caller against proposal.freelancerId (both normalized to lowercase 0x-prefixed).
+  - Reused loadProposals/saveProposals by exporting them from app/api/proposals/route.ts (and exporting PROPOSALS_PATH). No other changes to route.ts.
+  - Contract creation on accept: deferred to Phase 6. PATCH returns only { proposal }. Phase 6 can add contract creation either in this PATCH (when status === "accepted") or in a separate "Activate contract" flow.
+  - Next.js dynamic route params are awaited: params is Promise<{ id: string }>, so we await params in the handler.
+
+Task 5.2:
+  - ProposalCard.tsx: presentational component. Props: proposal, freelancerId, currentUserAddress, onAccept, onReject, loadingId. Accept/Reject buttons shown only when proposal.status === "pending" and currentUserAddress (normalized) equals freelancerId (normalized). loadingId disables both buttons for that proposal during PATCH.
+  - ChatThread: added handleProposalAccept and handleProposalReject; both call PATCH /api/proposals/[id] with status and freelancerAddress: eoaAddress, then update local state via setProposals (map-replace by id). proposalActionLoadingId state tracks which proposal is being updated. Replaced inline proposal divs with <ProposalCard /> for each proposal; metadata.freelancerId and eoaAddress passed for freelancer check.
+  - "Activate contract" CTA: not added in Phase 5; Phase 6 will add contract API and then a link from accepted proposals to /contract/[contractId].
+
+Caution:
+  - PATCH auth is address-based only (body.freelancerAddress). No server-side session; suitable for wallet-based app. If you add session auth later, consider validating that the session wallet matches freelancerAddress.

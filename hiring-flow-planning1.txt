@@ -1,0 +1,178 @@
+# Phase 1: Browse Gigs (Public) — Implementation Plan
+
+Reference: docs/hiring-flow-roadmap.md, Phase 1 (Tasks 1.1–1.3)
+
+Goal: Customers can browse all gigs and view gig detail pages publicly, without logging in. All data can be served from local JSON for development.
+
+================================================================================
+DATA MODEL
+================================================================================
+
+Reconcile two existing shapes:
+
+1. types/gig_object.ts (Igig_schema)
+   - id, title, description, price (number), deadline (string), status, createdAt, updatedAt, freelancerId
+
+2. lib/freelancer-types.ts (Gig)
+   - id, title, description, price (string), deliveryTime, tags[]
+
+For the public API and pages, use a single "API gig" shape that supports both listing and detail, and includes enough freelancer info for cards and detail:
+
+  GigApi = {
+    id: string
+    title: string
+    description: string
+    price: number          // for filtering/sorting; display as needed
+    deadline: string       // ISO date or human-readable
+    deliveryTime?: string // optional, from Gig
+    status: "pending" | "in_progress" | "completed" | "cancelled"
+    createdAt: string
+    updatedAt: string
+    freelancerId: string
+    tags?: string[]
+    // For list/detail display (denormalized or from join):
+    freelancer?: { firstName, lastName, bio, skills[] }
+  }
+
+Store in gigs.json as array of GigApi. GET /api/gigs returns { gigs: GigApi[] }. GET /api/gigs/[id] returns { gig: GigApi } or 404.
+
+================================================================================
+TASK 1.1 — Gig list API and mock data
+================================================================================
+
+Files to create:
+  - app/api/gigs/gigs.json
+  - app/api/gigs/route.ts
+
+Steps:
+
+1) Create app/api/gigs/gigs.json
+   - Array of 4–6 sample gigs.
+   - Each: id (e.g. uuid or slug like "smart-contract-audit"), title, description, price (number), deadline (ISO string), deliveryTime (e.g. "7 days"), status ("pending" or "in_progress"), createdAt, updatedAt, freelancerId (e.g. "0x..." or slug), tags (string[]).
+   - Include freelancer summary on each: freelancer: { firstName, lastName, bio, skills } so list and detail can show it without a separate freelancer API call for Phase 1.
+   - Use consistent freelancerIds so 2–3 freelancers appear across gigs.
+
+2) Create app/api/gigs/route.ts
+   - GET only.
+   - Read gigs from gigs.json (use fs/promises readFile; path: same dir or process.cwd() + "/app/api/gigs/gigs.json"). Parse JSON.
+   - Optional query: freelancerId. If present, filter gigs by freelancerId.
+   - Return NextResponse.json({ gigs: gigsArray }).
+   - Handle file-not-found / parse errors: return { gigs: [] } or 500 with message.
+   - No auth; public.
+
+Acceptance:
+   - GET /api/gigs returns list of gigs.
+   - GET /api/gigs?freelancerId=0x123 returns only that freelancer’s gigs.
+
+================================================================================
+TASK 1.2 — Public gig listing page
+================================================================================
+
+Files to create:
+  - app/(public)/gigs/page.tsx
+  - components/pages/GigList.tsx
+
+Files to modify (optional):
+  - lib/nav.ts — add "Browse Gigs" link if desired (path: /gigs).
+
+Steps:
+
+1) Create route group and page
+   - Create app/(public)/layout.tsx: minimal layout (no dashboard sidebar). Just wrap children in a simple shell (e.g. header with logo + “Browse Gigs” / “Sign In”), then { children }. Reuse root layout (Providers) from app/layout.tsx.
+   - Create app/(public)/gigs/page.tsx: default export that renders <GigList />.
+
+2) Create components/pages/GigList.tsx (client component)
+   - On mount (useEffect) or with fetch/useSWR/useQuery: GET /api/gigs. Store gigs in state.
+   - Loading: show skeleton or “Loading…”.
+   - Empty: “No gigs yet.”
+   - List: grid of cards (e.g. grid-cols-1 md:grid-cols-2 lg:grid-cols-3). Each card (shadcn Card):
+     - Title, short description (truncate), price (formatted), deadline or deliveryTime, freelancer name (freelancer.firstName + lastName).
+     - Card links to /gigs/[id] (Link from next/link).
+   - Use shadcn Button only if needed (e.g. “View” on card). Prefer whole card as link for accessibility.
+   - Error state: show message if fetch fails.
+
+3) Nav (optional)
+   - In lib/nav.ts add an entry for “Browse Gigs” -> /gigs in navLinks and/or navItems, if the public header or a shared nav should show it.
+
+Acceptance:
+   - Visiting /gigs shows a grid of gig cards; each card links to /gigs/[id].
+   - No login required.
+   - Public layout has no dashboard sidebar.
+
+================================================================================
+TASK 1.3 — Public gig detail page
+================================================================================
+
+Files to create:
+  - app/(public)/gigs/[id]/page.tsx
+  - components/pages/GigDetail.tsx
+  - app/api/gigs/[id]/route.ts
+
+Steps:
+
+1) Create GET /api/gigs/[id]
+   - app/api/gigs/[id]/route.ts: GET handler. Read same gigs.json, find gig where gig.id === params.id. If not found, return 404. Return NextResponse.json({ gig }).
+   - Use dynamic params: params.id from NextRequest or route segment.
+
+2) Create app/(public)/gigs/[id]/page.tsx
+   - Export default function Page({ params }: { params: { id: string } }). Render <GigDetail gigId={params.id} />. For Next 15 async params, use await params if needed.
+
+3) Create components/pages/GigDetail.tsx (client component)
+   - Props: gigId: string.
+   - Fetch GET /api/gigs/[gigId]. Store gig in state; loading and error states.
+   - If 404 or !gig: show “Gig not found” and optional link back to /gigs.
+   - Otherwise render:
+     - Title, full description, price (formatted), deadline, deliveryTime, status.
+     - Freelancer block: name (firstName + lastName), bio, skills (tags/badges).
+     - Primary CTA button: “Request quote” or “Contact freelancer”. For Phase 1 this can be a placeholder: link to /auth with query redirect=/gigs/[id] (Phase 2 will wire auth + quote). Or plain button that does nothing yet; document “Phase 2: wire to auth”.
+   - Use shadcn Card, Button, Badge for skills. Keep layout readable (max-width container, spacing).
+
+Acceptance:
+   - /gigs/[id] shows one gig with full details and freelancer info.
+   - “Request quote” (or equivalent) is present; can link to /auth?redirect=/gigs/[id] for Phase 2.
+
+================================================================================
+IMPLEMENTATION ORDER
+================================================================================
+
+1. Task 1.1 — API + gigs.json first (so 1.2 and 1.3 can call it).
+2. Task 1.2 — Listing page and public layout.
+3. Task 1.3 — Detail API and detail page.
+
+================================================================================
+DECISIONS & NOTES
+================================================================================
+
+- Public layout: New (public) route group so /gigs and /gigs/[id] do not use the dashboard layout (no sidebar). Simpler header only.
+- Freelancer data: Embedded in gigs.json for Phase 1 to avoid dependency on Redis/freelancer API. Later you can replace with join or freelancer API.
+- Price: Store as number in JSON; format on the client (e.g. $1,234.00).
+- CTA on detail: “Request quote” is the main action; Phase 2 will add auth check and redirect.
+
+================================================================================
+IMPLEMENTATION DETAILS (POST-DEVELOPMENT)
+================================================================================
+
+Completed: 2025-03-01 (Phase 1 execution)
+
+Files created:
+  - app/api/gigs/gigs.json          — 5 sample gigs, 2 freelancerIds, embedded freelancer
+  - app/api/gigs/route.ts           — GET, optional ?freelancerId=, loadGigs() helper
+  - app/api/gigs/[id]/route.ts      — GET by id, 404 if not found; params awaited (Next 16)
+  - app/(public)/layout.tsx         — Header: logo (Link /), Browse Gigs (/gigs), Sign In (/auth)
+  - app/(public)/gigs/page.tsx      — Renders <GigList />
+  - app/(public)/gigs/[id]/page.tsx — Async page: await params then <GigDetail gigId={id} />
+  - components/pages/GigList.tsx    — Client: fetch /api/gigs, loading/error/empty, card grid
+  - components/pages/GigDetail.tsx  — Client: fetch /api/gigs/[id], back link, CTA to /auth?redirect=...
+
+Files modified:
+  - lib/nav.ts — Added "Browse Gigs" -> /gigs to navLinks (for TopBar/dashboard nav)
+
+Technical notes:
+  - API route [id]: context.params is Promise<{ id: string }> in Next 16; use await context.params.
+  - Gig detail page: async server component that awaits params then passes id to client GigDetail (avoids passing Promise to client).
+  - GigApi type duplicated in route.ts, [id]/route.ts, GigList, GigDetail; consider moving to types/gig-api.ts or lib/freelancer-types if you want a single source.
+  - Request quote link: GigDetail uses /auth?redirect=/gigs/[id]&action=request_quote so Phase 2 can redirect back and read action.
+
+Cautions:
+  - Reading gigs.json via fs from process.cwd() + app/api/gigs/gigs.json. path.join(process.cwd(), "app", "api", "gigs", "gigs.json") is already used.
+  - Public layout has no AuthProvider-dependent UI; if you add "Sign In" state (e.g. show "Dashboard" when logged in), wrap public layout or header in a client component that uses useAuth().

@@ -1,0 +1,97 @@
+[
+  {
+    "id": "smart-contract-audit",
+    "title": "Smart Contract Security Audit",
+    "description": "Professional audit of your Solidity smart contracts. Includes gas optimization review, vulnerability analysis, and a written report with remediation steps. Ideal for DeFi protocols and NFT projects before mainnet deployment.",
+    "price": 3500,
+    "deadline": "2025-04-15T23:59:59.000Z",
+    "deliveryTime": "14 days",
+    "status": "pending",
+    "createdAt": "2025-03-01T10:00:00.000Z",
+    "updatedAt": "2025-03-01T10:00:00.000Z",
+    "freelancerId": "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
+    "tags": ["Solidity", "Security", "DeFi", "Audit"],
+    "freelancer": {
+      "firstName": "Alex",
+      "lastName": "Rivers",
+      "bio": "Senior blockchain engineer specializing in secure smart contract development and cross-chain protocol design. 6+ years building in Web3.",
+      "skills": ["Smart Contracts", "Rust", "Solidity", "React", "TypeScript", "DeFi Protocols"]
+    }
+  },
+  {
+    "id": "defi-yield-integration",
+    "title": "DeFi Yield Aggregator Integration",
+    "description": "Integrate your protocol with major yield sources (Aave, Compound, Yearn). Build a unified interface for deposit/withdraw and automated rebalancing. Includes testing and documentation.",
+    "price": 5200,
+    "deadline": "2025-04-30T23:59:59.000Z",
+    "deliveryTime": "21 days",
+    "status": "pending",
+    "createdAt": "2025-03-01T10:00:00.000Z",
+    "updatedAt": "2025-03-01T10:00:00.000Z",
+    "freelancerId": "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
+    "tags": ["DeFi", "Solidity", "Integration", "Web3"],
+    "freelancer": {
+      "firstName": "Alex",
+      "lastName": "Rivers",
+      "bio": "Senior blockchain engineer specializing in secure smart contract development and cross-chain protocol design. 6+ years building in Web3.",
+      "skills": ["Smart Contracts", "Rust", "Solidity", "React", "TypeScript", "DeFi Protocols"]
+    }
+  },
+  {
+    "id": "nft-minting-dapp",
+    "title": "NFT Minting DApp (React + Ethers)",
+    "description": "Full-stack NFT minting application: connect wallet, mint from your ERC-721 contract, view collection. Responsive UI with Tailwind, MetaMask/WalletConnect support. Delivery includes source code and deployment guide.",
+    "price": 1800,
+    "deadline": "2025-04-10T23:59:59.000Z",
+    "deliveryTime": "7 days",
+    "status": "in_progress",
+    "createdAt": "2025-02-20T10:00:00.000Z",
+    "updatedAt": "2025-03-01T09:00:00.000Z",
+    "freelancerId": "0x8626f6940E2eb28930eBb1CeA73f8eC08360190B",
+    "tags": ["React", "NFT", "Ethers.js", "Web3"],
+    "freelancer": {
+      "firstName": "Jordan",
+      "lastName": "Lee",
+      "bio": "Frontend and Web3 developer. Built multiple NFT drops and marketplace UIs. Focus on clean UX and gas-efficient interactions.",
+      "skills": ["React", "Next.js", "Ethers.js", "IPFS", "NFT"]
+    }
+  },
+  {
+    "id": "subgraph-indexing",
+    "title": "The Graph Subgraph for Your Protocol",
+    "description": "Design and deploy a subgraph for your smart contracts. Entity schema, event handlers, and GraphQL API. Hosted or self-hosted deployment. Optimized for low latency and correct ordering.",
+    "price": 2400,
+    "deadline": "2025-04-25T23:59:59.000Z",
+    "deliveryTime": "10 days",
+    "status": "pending",
+    "createdAt": "2025-02-28T10:00:00.000Z",
+    "updatedAt": "2025-02-28T10:00:00.000Z",
+    "freelancerId": "0x8626f6940E2eb28930eBb1CeA73f8eC08360190B",
+    "tags": ["The Graph", "Subgraph", "Indexing", "GraphQL"],
+    "freelancer": {
+      "firstName": "Jordan",
+      "lastName": "Lee",
+      "bio": "Frontend and Web3 developer. Built multiple NFT drops and marketplace UIs. Focus on clean UX and gas-efficient interactions.",
+      "skills": ["React", "Next.js", "Ethers.js", "IPFS", "NFT"]
+    }
+  },
+  {
+    "id": "escrow-contract-audit",
+    "title": "Escrow Contract Review & Hardening",
+    "description": "Review your escrow or payment contract for correctness and security. Covers deposit, release, dispute, and timeout logic. Deliverables: markdown report and optional fixes as patches.",
+    "price": 2100,
+    "deadline": "2025-04-20T23:59:59.000Z",
+    "deliveryTime": "7 days",
+    "status": "pending",
+    "createdAt": "2025-03-01T08:00:00.000Z",
+    "updatedAt": "2025-03-01T08:00:00.000Z",
+    "freelancerId": "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
+    "tags": ["Escrow", "Solidity", "Security", "Payments"],
+    "freelancer": {
+      "firstName": "Alex",
+      "lastName": "Rivers",
+      "bio": "Senior blockchain engineer specializing in secure smart contract development and cross-chain protocol design. 6+ years building in Web3.",
+      "skills": ["Smart Contracts", "Rust", "Solidity", "React", "TypeScript", "DeFi Protocols"]
+    }
+  }
+]

@@ -1,0 +1,118 @@
+# Phase 6: Contract Activation (Escrow + Deposit) — Implementation Plan
+
+Reference: docs/hiring-flow-roadmap.md, Phase 6 (Tasks 6.1–6.4)
+
+Goal: Each accepted proposal leads to a contract record. Contract creation can trigger escrow deployment; customer deposits into escrow; users see their contracts and can complete deposit or proceed to delivery.
+
+Prerequisites: Phase 5 complete. Freelancer can accept proposals; proposal status becomes "accepted". No contract record is created yet in Phase 5—Phase 6 introduces the contract API and links it to accepted proposals.
+
+================================================================================
+TASK 6.1 — Contract record and link to proposal
+================================================================================
+
+Files to create:
+  - app/api/contracts/route.ts
+  - app/api/contracts/contracts.json (optional; or use fs + JSON like proposals)
+
+Files to reference:
+  - types/active_contract_page.ts (Icontract_schema: id, title, status, payee_acceptance, payer_acceptance, description, deadline, notes, contractSpecs, contractDeliverables). Extend or add a type that includes payer, payee, amount, gigId, proposalId for the hiring flow.
+
+Steps:
+  1) Define or extend contract type: include id, gigId, proposalId, payer (customer), payee (freelancer), amount (number, from proposal.price), status (e.g. "discovery" | "in_progress" | "awaiting_deposit" | "completed" | "cancelled"), payer_acceptance, payee_acceptance, contractSpecs (array of { network, escrowAddress }), createdAt, and any fields from Icontract_schema (title, description, deadline, notes, contractDeliverables). Align with existing Contract.tsx if it expects a specific shape.
+  2) Implement POST /api/contracts: body { proposalId } (or { proposalId, gigId, payer, payee, amount }). Load proposal by id; verify status === "accepted". Create contract record with payer = proposal.customerId, payee = proposal.freelancerId, amount = proposal.price, status = "discovery" or "awaiting_deposit". Persist to contracts.json. Return { contract }.
+  3) Implement GET /api/contracts: support query params id (single contract) or threadId (contracts for that thread) or address (contracts where payer or payee equals address). Return { contract } or { contracts: [] }.
+  4) Optional: from Phase 5 PATCH accept, call into contract creation so that accepting a proposal automatically creates a contract and returns contractId (then ChatThread can show "Activate contract" linking to /contract/[contractId]). Alternatively, add "Create contract" / "Activate contract" button in chat that calls POST /api/contracts with the accepted proposal id.
+
+Acceptance:
+  - Contract record exists per accepted proposal; GET by id, threadId, or address works.
+
+================================================================================
+TASK 6.2 — Deploy escrow on contract creation
+================================================================================
+
+Files to modify/create:
+  - app/api/contracts/route.ts (or app/api/contracts/activate/route.ts)
+  - app/api/deploy-escrow/route.ts (use existing POST)
+
+Steps:
+  1) When creating a contract (POST) or when "Activate" is requested (e.g. PATCH /api/contracts/[id]/activate or POST /api/contracts/activate with contractId): call POST /api/deploy-escrow with body { freelancer: payee, customer: payer }. No amount in deploy-escrow (customer funds later via deposit).
+  2) Store returned contractAddress (and network, e.g. "polygon") in contract.contractSpecs: [{ network: "polygon", escrowAddress }]. Persist updated contract.
+  3) If deploy fails, either leave contract without escrow (status "awaiting_deposit" or "discovery") and surface error to client, or do not create contract until deploy succeeds—decide and document.
+
+Acceptance:
+  - Activating a contract results in an escrow address stored on the contract.
+
+================================================================================
+TASK 6.3 — Customer deposit flow (fund escrow)
+================================================================================
+
+Files to create:
+  - app/(dashboard)/contract/[contractId]/page.tsx
+  - components/pages/ContractActivation.tsx (or similar)
+
+Files to modify (if needed):
+  - app/(dashboard)/funding/page.tsx or use dedicated deposit flow
+
+Steps:
+  1) Contract detail page at /contract/[contractId]: fetch GET /api/contracts?id=[contractId]. Show contract details: gig/proposal summary, payer, payee, amount, status, escrow address (if any).
+  2) If contract has escrow and status is awaiting deposit: show "Deposit" CTA. Deposit flow: use existing Safe/execute flow or a dedicated "fund escrow" API that sends USDC (or test token) to the escrow contract. See app/api/deploy-escrow and escrow ABI for deposit methods (e.g. depositUsdc).
+  3) Until deposit is confirmed (on-chain or via API callback), show "Pending deposit". After deposit, update contract status to "in_progress" (may require backend to poll or webhook; or client reports and PATCH contract status).
+  4) If no escrow yet (contract just created), show "Activate contract" that triggers deploy (Task 6.2) then redirect or refresh to show deposit step.
+
+Acceptance:
+  - Customer can open a contract, see escrow address and amount, and initiate deposit. UI reflects pending vs funded.
+
+================================================================================
+TASK 6.4 — Contract list and status
+================================================================================
+
+Files to modify:
+  - app/(dashboard)/contract/page.tsx
+  - components/pages/Contract.tsx
+  - app/api/contracts/route.ts (ensure GET ?address=... lists by user)
+
+Steps:
+  1) Contract list: call GET /api/contracts?address=[currentUserWallet]. Display contract cards with status (awaiting deposit, in progress, delivery pending, completed). Link each card to /contract/[contractId].
+  2) Reuse or adapt existing Contract.tsx: if it currently uses a different data source (e.g. session chat), extend it to fetch from GET /api/contracts?address=... and render contract list. Add link to /contract/[contractId] for deposit or delivery.
+  3) Ensure contract status labels are consistent (e.g. awaiting_deposit, in_progress, completed).
+
+Acceptance:
+  - User sees their contracts (as payer or payee); each links to detail page for deposit or next steps.
+
+================================================================================
+IMPLEMENTATION ORDER
+================================================================================
+
+1. Task 6.1 — Contract type, POST/GET /api/contracts, persist to contracts.json; optionally wire contract creation into Phase 5 accept or add "Activate contract" in chat.
+2. Task 6.2 — On contract creation or activate, call deploy-escrow and store escrow address in contractSpecs.
+3. Task 6.3 — Contract detail page and deposit flow (escrow funding).
+4. Task 6.4 — Contract list page and GET by address; link to detail.
+
+================================================================================
+DECISIONS & NOTES
+================================================================================
+
+- contracts.json: Same pattern as proposals (fs read/write in API routes). Path e.g. app/api/contracts/contracts.json.
+- Icontract_schema: types/active_contract_page.ts has no payer/payee/amount; add an extended type or a separate ContractRecord type for the API that includes payer, payee, amount, gigId, proposalId and aligns with Icontract_schema for contractSpecs, status, acceptances.
+- Escrow deploy: deploy-escrow/route.ts expects { freelancer, customer }. Amount is not set at deploy; customer funds later. So contract creation → create record → on "Activate" call deploy-escrow → save escrow address → show deposit UI.
+- Deposit: Escrow ABI (app/api/deploy-escrow/abi.json) likely has depositUsdc or similar; confirm method name and params. Customer may need to approve USDC and then call deposit on escrow contract; relayer or client can execute.
+
+================================================================================
+IMPLEMENTATION NOTES (post Phase 6)
+================================================================================
+
+- Contract type: New file types/contract.ts with ContractSchema, ContractStatus ("discovery" | "awaiting_deposit" | "in_progress" | "completed" | "cancelled" | "disputed"), ContractSpecSchema, CreateContractBodySchema. Includes id, gigId, proposalId, threadId, payer, payee, amount, status, payer_acceptance, payee_acceptance, contractSpecs, contractDeliverables, createdAt, updatedAt. Icontract_schema in active_contract_page.ts left unchanged; hiring flow uses types/contract.ts.
+
+- Contracts API: app/api/contracts/route.ts — loadContracts/saveContracts from app/api/contracts/contracts.json. GET supports ?id=, ?threadId=, ?address= (any one required). POST body { proposalId }; loads proposal, validates status === "accepted", creates contract with status "awaiting_deposit", no escrow yet. Idempotent: if contract already exists for proposalId, returns that contract.
+
+- Escrow activation: Separate from contract creation. app/api/contracts/[id]/activate/route.ts — POST only. Fetches contract, if contractSpecs already has escrow returns early. Otherwise calls same-origin POST /api/deploy-escrow with { freelancer: payee, customer: payer }. On success appends { network, escrowAddress } to contract.contractSpecs and persists. Uses NEXT_PUBLIC_APP_URL or request.nextUrl.origin for internal fetch (needed for server-side call to deploy-escrow).
+
+- Contract detail: app/(dashboard)/contract/[contractId]/page.tsx renders ContractActivation with contractId. ContractActivation.tsx fetches GET /api/contracts?id=contractId, shows summary (amount, status, payer, payee, escrow address). If no escrow: "Activate contract (deploy escrow)" → POST /api/contracts/[id]/activate, then refresh. If awaiting_deposit and user is payer: instructions for depositUsdc (amount in 6 decimals), link to /funding, and "I've deposited — mark as funded" → PATCH /api/contracts/[id] { status: "in_progress" }. No server-side deposit execution; client/Safe flow to be wired later (execute-safe-tx or wallet).
+
+- Contract list: New component components/pages/ContractList.tsx — useQuery GET /api/contracts?address=eoaAddress. Renders contract cards (amount, role Customer/Freelancer, status, escrow snippet). Each card links to /contract/[id]. app/(dashboard)/contract/page.tsx now renders ContractList instead of Contract. Original Contract.tsx (chat + delivery panel) kept for potential Phase 7 delivery UI reuse.
+
+- Chat integration: ChatThread loads contracts for thread (GET /api/contracts?threadId=...). ProposalCard extended with contractId (from contracts.find(c => c.proposalId === p.id)), onActivateContract(proposalId) → POST /api/contracts { proposalId }, returns contract.id and redirects to /contract/[id], and activatingContractId. For accepted proposals: if no contract yet, show "Activate contract"; if contract exists, show "Open contract" link.
+
+- PATCH /api/contracts/[id]: app/api/contracts/[id]/route.ts — GET single contract, PATCH body { status } to update contract status (allowed: discovery, awaiting_deposit, in_progress, completed, cancelled, disputed). Used for "mark as funded" and future status updates.
+
+- Caution: activate route uses fetch to same-origin deploy-escrow; ensure NEXT_PUBLIC_APP_URL is set in production or deploy may fail. Deposit flow is currently "mark as funded" by user; full on-chain deposit via Safe/relayer can be added later.

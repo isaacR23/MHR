@@ -32,6 +32,7 @@ export const navItems: NavItem[] = [
 /** Top bar nav links (label + path only). Order matches TopBar design. */
 export const navLinks: { label: string; path: string }[] = [
   { label: "Dashboard", path: "/" },
+  { label: "Browse Gigs", path: "/gigs" },
   { label: "Talent Pool", path: "/register" },
   { label: "Find Talent", path: "/hire" },
   { label: "Workspaces", path: "/workspaces" },
